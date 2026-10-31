@@ -1,525 +1,359 @@
+"""Model page: 2D/3D drawings generated from engine geometry (nothing hard-coded)."""
 import numpy as np
-from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
-                               QLabel, QFrame, QCheckBox, QFileDialog, QDialog, QSizePolicy)
 from PySide6.QtCore import Qt
-import matplotlib.pyplot as plt
-import matplotlib.patches as patches
-from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
-from matplotlib.backends.backend_qtagg import NavigationToolbar2QT
+from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QComboBox, QLabel, QFrame, QCheckBox, QPushButton,
+                               QDialog, QScrollArea)
+from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavBar
+from ui_common import attach_interaction
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as Canvas
 from matplotlib.figure import Figure
+from matplotlib.patches import Circle, Polygon, Rectangle
+from bridge_engine import girder_width, BridgeInputs
+
+VIEWS = ["3D view", "Elevation", "Plan", "Bridge cross-section", "Girder section & tendons"]
+
+
+def _inp(r):
+    return BridgeInputs.from_dict(r["inputs"])
+
+
+def girder_outline(p):
+    y = np.linspace(0, p.depth, 400); w = girder_width(y, p)
+    return np.concatenate([np.column_stack([-w / 2, y]), np.column_stack([w[::-1] / 2, y[::-1]])])
+
+
+def girder_x_positions(g):
+    return (np.arange(g["n_girders"]) - (g["n_girders"] - 1) / 2) * g["spacing"]
+
+
+
+LIGHT = np.array([-0.45, -0.6, 0.66]); LIGHT = LIGHT / np.linalg.norm(LIGHT)
+
+
+def _shade(face, base):
+    v = np.asarray(face, float)
+    n = np.cross(v[1] - v[0], v[2] - v[0]); nn = np.linalg.norm(n)
+    if nn == 0: return base
+    n = n / nn
+    k = 0.5 + 0.5 * abs(float(n @ LIGHT))
+    return tuple(np.clip(np.array(base[:3]) * k, 0, 1)) + (base[3] if len(base) > 3 else 1.0,)
+
+
+def _box(x0, x1, y0, y1, z0, z1):
+    c = [(x0, y0, z0), (x1, y0, z0), (x1, y1, z0), (x0, y1, z0), (x0, y0, z1), (x1, y0, z1), (x1, y1, z1), (x0, y1, z1)]
+    return [[c[i] for i in f] for f in ((0, 1, 2, 3), (4, 5, 6, 7), (0, 1, 5, 4), (2, 3, 7, 6), (1, 2, 6, 5), (0, 3, 7, 4))]
+
+
+ELEMENTS = ["Concrete deck slab", "PSC I-girders", "Cross diaphragms", "Abutments", "Bearings",
+            "Dimensions", "Geometry box", "Axes"]
+
+
+def draw_3d(fig, r, p, g, show=None, angles=(30, -62), zoom=1.25):
+    show = {k: True for k in ELEMENTS} if show is None else show
+    sel = show.get("_girders") or [True] * g["n_girders"]
+    from mpl_toolkits.mplot3d.art3d import Poly3DCollection
+    from matplotlib.patches import Patch
+    L, W, n = g["L"], g["W"], g["n_girders"]; xs = girder_x_positions(g)
+    top = p.depth + p.haunch + p.slab_t
+    ax = fig.add_subplot(111, projection="3d"); ax.set_axis_off()
+    _abh = max(1.4, 0.06 * L); _zsp = -0.15 - _abh
+    ax.set_xlim(-3, L + 7); ax.set_ylim(-W / 2 - 3, W / 2 + 3); ax.set_zlim(_zsp - 1.5, top + 3.2)
+    ax.set_autoscale_on(False)      # fixed limits: no autoscale (avoids matplotlib overflow after an empty redraw)
+    solid, scol = [], []
+    def add(faces, col):
+        for f in faces: solid.append(f); scol.append(_shade(f, col))
+    # abutments and bearings
+    ab_l, ab_h = 1.6, max(1.4, 0.06 * L)
+    for x0 in ((-0.5 - ab_l + 1.0, L - 1.0 + 0.0) if show["Abutments"] else ()):
+        add(_box(x0, x0 + ab_l, -W / 2 - 0.6, W / 2 + 0.6, -0.15 - ab_h, -0.15), (0.78, 0.78, 0.76))
+    for k_, xg in enumerate(xs):
+      if not (show["Bearings"] and sel[k_]): continue
+      for xb in (0.25, L - 0.25):
+        add(_box(xb - 0.25, xb + 0.25, xg - 0.3, xg + 0.3, -0.15, 0.0), (0.18, 0.25, 0.42))
+    # girders: extruded I-section
+    y0 = np.linspace(0, p.depth, 400); w0 = girder_width(y0, p)
+    bp = [0] + [i for i in range(1, len(y0) - 1) if abs(w0[i + 1] - 2 * w0[i] + w0[i - 1]) > 1e-7] + [len(y0) - 1]
+    bp = sorted(set(bp)); y = y0[bp]; w = w0[bp]          # only the vertices where the section shape changes
+    for k_, xg in enumerate(xs):
+      if not (show["PSC I-girders"] and sel[k_]): continue
+      if True:
+        for i in range(len(y) - 1):
+            for sgn in (-1, 1):
+                add([[(0, xg + sgn * w[i] / 2, y[i]), (L, xg + sgn * w[i] / 2, y[i]),
+                      (L, xg + sgn * w[i + 1] / 2, y[i + 1]), (0, xg + sgn * w[i + 1] / 2, y[i + 1])]], (0.28, 0.5, 0.8))
+        for xx in (0, L):
+            add([[(xx, xg - w[i] / 2, y[i]) for i in range(len(y))] + [(xx, xg + w[i] / 2, y[i]) for i in range(len(y) - 1, -1, -1)]], (0.25, 0.46, 0.76))
+        add([[(0, xg - w[0] / 2, 0), (L, xg - w[0] / 2, 0), (L, xg + w[0] / 2, 0), (0, xg + w[0] / 2, 0)]], (0.22, 0.4, 0.68))
+        add([[(0, xg - w[-1] / 2, p.depth), (L, xg - w[-1] / 2, p.depth), (L, xg + w[-1] / 2, p.depth), (0, xg + w[-1] / 2, p.depth)]], (0.3, 0.52, 0.82))
+    # haunch: fills the gap between girder top flange and the deck slab soffit
+    if p.haunch > 0:
+        for k_, xg in enumerate(xs):
+            if show["PSC I-girders"] and sel[k_]:
+                add(_box(0, L, xg - p.bt / 2, xg + p.bt / 2, p.depth, p.depth + p.haunch), (0.62, 0.66, 0.72))
+    # diaphragms
+    dx = np.linspace(0, L, p.n_diaphragms)
+    for xd in (dx if show["Cross diaphragms"] else ()):
+        t = p.dia_t
+        x0 = min(max(xd - t / 2, 0), L - t)
+        for k in range(n - 1):
+            if not (sel[k] and sel[k + 1]): continue
+            add(_box(x0, x0 + t, xs[k] + p.tw / 2, xs[k + 1] - p.tw / 2, p.tb, p.depth - p.tf), (0.93, 0.55, 0.25))
+    if solid:
+        ax.add_collection3d(Poly3DCollection(solid, facecolors=scol, edgecolors=scol, linewidths=0.4))
+    slab = Poly3DCollection(_box(0, L, -W / 2, W / 2, p.depth + p.haunch, top), facecolors=(0.78, 0.84, 0.92, 0.38),
+                            edgecolors=(0.3, 0.4, 0.55, 0.9), linewidths=0.7)
+    slab.set_zorder(10)
+    if show["Concrete deck slab"]: ax.add_collection3d(slab)
+    # dimensions (placed clear of the model, labels on a white backing so nothing is cut or overprinted)
+    dc = "#1A365D"; zsp = -0.15 - ab_h
+    lab = dict(color=dc, ha="center", va="center", bbox=dict(boxstyle="round,pad=0.15", fc="white", ec="none", alpha=0.85))
+    if show["Dimensions"]:
+        xd0 = -2.4; zd = top + 0.4
+        ax.plot([xd0, xd0], [-W / 2, W / 2], [zd, zd], color=dc, lw=1.2)
+        for yy in np.concatenate([[-W / 2], xs, [W / 2]]):
+            ax.plot([xd0, xd0], [yy, yy], [zd - 0.3, zd + 0.3], color=dc, lw=1)
+        ax.text(xd0, 0, zd + 1.3, f"Deck width = {W:.2f} m", fontsize=10, fontweight="bold", **lab)
+        for k in range(n - 1):
+            ax.text(xd0, (xs[k] + xs[k + 1]) / 2, zd - 0.85, f"{g['spacing']:.2f}", fontsize=8, **lab)
+        ysp = -W / 2 - 3.2
+        ax.plot([0, L], [ysp, ysp], [zsp, zsp], color=dc, lw=1.2)
+        for xx in (0, L): ax.plot([xx, xx], [ysp, ysp + 1.0], [zsp, zsp], color=dc, lw=1)
+        ax.text(L / 2, ysp - 1.5, zsp - 0.9, f"Span length, L = {L:.2f} m", fontsize=10, fontweight="bold", **lab)
+        for k, xd in enumerate(dx[1:-1], 1):
+            ax.text(xd, -W / 2 - 1.4, zsp + 0.9, f"D{k}  x = {xd:.1f} m", fontsize=7, **lab)
+        if show["Abutments"]:
+            ax.text(-1.0, -W / 2 - 1.5, -0.6, "Abutment A", fontsize=8, **lab)
+            ax.text(L + 1.0, -W / 2 - 1.5, -0.6, "Abutment B", fontsize=8, **lab)
+    ax.set_xlim(-4, L + 6); ax.set_ylim(-W / 2 - 4, W / 2 + 3); ax.set_zlim(zsp - 1.8, top + 3.2)
+    fig._aspect = (L + 10, W + 7, (top + 3.2 - zsp + 1.8) * 2.0); fig._zoom = zoom
+    ax.set_box_aspect(fig._aspect, zoom=zoom)
+    ax.view_init(*angles); fig.subplots_adjust(left=0, right=1, bottom=0, top=1)
+    fig._gizmo = None; fig._main3d = ax
+    if show["Axes"]:
+        gz = fig.add_axes([0.0, 0.02, 0.2, 0.3], projection="3d"); gz.set_axis_off()
+        gz.set_xlim(-0.4, 1.7); gz.set_ylim(-0.4, 1.7); gz.set_zlim(-0.4, 1.7); gz.set_autoscale_on(False)
+        gz.set_box_aspect((1, 1, 1), zoom=1.0)
+        for v, c, lab in (((1, 0, 0), "#D69E2E", "X"), ((0, 1, 0), "#2F855A", "Y"), ((0, 0, 1), "#C53030", "Z")):
+            gz.quiver(0, 0, 0, *v, color=c, arrow_length_ratio=0.22, linewidth=1.8)
+            gz.text(*(1.3 * np.array(v)), lab, color=c, fontsize=10, fontweight="bold", ha="center", va="center")
+        gz.view_init(*angles); fig._gizmo = gz
+    _collect_heavy(fig, ax)
+
+
+def _collect_heavy(fig, ax):
+    fig._heavy = list(ax.texts) + list(ax.lines)
+
+
+DIMC = "#1E293B"  # Professional Dark Slate Gray
+
+def dim_h(ax, x0, x1, y, text, off=0.0, fs=8):
+    """Horizontal dimension line with crisp CAD-style arrows and minimal background padding."""
+    ax.annotate("", xy=(x0, y), xytext=(x1, y), 
+                arrowprops=dict(arrowstyle="<->", color=DIMC, lw=0.75, mutation_scale=8))
+    
+    # Position text dynamically: if no offset, center it; otherwise push it cleanly above/below
+    valign = "center" if off == 0 else ("bottom" if off > 0 else "top")
+    ax.text((x0 + x1) / 2, y + off, text, color=DIMC, ha="center", va=valign, fontsize=fs,
+            bbox=dict(fc="white", ec="none", pad=0.3, alpha=0.85))
+
+def dim_v(ax, y0, y1, x, text, ha="left", dx=0.0, fs=8):
+    """Vertical dimension line with crisp CAD-style arrows and aligned side text."""
+    ax.annotate("", xy=(x, y0), xytext=(x, y1), 
+                arrowprops=dict(arrowstyle="<->", color=DIMC, lw=0.75, mutation_scale=8))
+    
+    # Respects the original horizontal alignment (left/right) so text doesn't sit on the line
+    ax.text(x + dx, (y0 + y1) / 2, text, color=DIMC, ha=ha, va="center", fontsize=fs,
+            bbox=dict(fc="white", ec="none", pad=0.3, alpha=0.85))
+
+
+def draw_view(fig, view, r, show=None, angles=(30, -62), zoom=1.25):
+    fig.clear(); fig._main3d = None; fig._gizmo = None; fig._heavy = []; g = r["geom"]; p = _inp(r); L = g["L"]; xs = girder_x_positions(g); W = g["W"]
+    if view == VIEWS[0]:
+        draw_3d(fig, r, p, g, show, angles, zoom)
+        return
+    if view == VIEWS[1]:
+        ax = fig.add_subplot(111); top = p.depth + p.haunch + p.slab_t
+        ax.add_patch(Rectangle((0, p.depth + p.haunch), L, p.slab_t, fc="#BEE3F8", ec="k"))
+        ax.add_patch(Rectangle((0, 0), L, p.depth, fc="#E2E8F0", ec="k"))
+        ax.add_patch(Rectangle((0, p.depth), L, p.haunch, fc="#CBD5E0", ec="k", lw=0.6))
+        for xx in np.linspace(0, L, p.n_diaphragms):
+            ax.plot([xx, xx], [0, p.depth], color="#DD6B20", lw=2)
+        ax.plot(r["forces"]["xs"], r["prestress"]["cable_y"], "r-", label="Tendon CG"); ax.legend()
+        for xx in (0, L):   # bearings at support centres
+            ax.add_patch(Polygon([[xx - .25, -.2], [xx + .25, -.2], [xx, 0]], fc="#2D3748"))
+        dim_h(ax, 0, L, -0.45, f"Span L = {L:.2f} m", off=0.05, fs=9)
+        dxs = np.linspace(0, L, p.n_diaphragms)
+        for a_, b_ in zip(dxs[:-1], dxs[1:]): dim_h(ax, a_, b_, top + 0.25, f"{b_-a_:.2f}", off=0.03)
+        dim_v(ax, 0, p.depth, -0.6, f"D = {p.depth:.2f}", ha="right"); dim_v(ax, p.depth + p.haunch, top, L + 0.5, f"slab {p.slab_t*1000:.0f}")
+        ax.set_xlim(-3, L + 3); ax.set_ylim(-.9, top + .8); ax.set_aspect("equal" if L < 15 else "auto")
+        ax.set_title(f"Elevation, span {L:.2f} m"); ax.set_xlabel("m")
+    elif view == VIEWS[2]:
+        ax = fig.add_subplot(111)
+        ax.add_patch(Rectangle((0, -W / 2), L, W, fc="#EDF2F7", ec="k"))
+        for xg in xs: ax.plot([0, L], [xg, xg], color="#2B6CB0", lw=3)
+        for xx in np.linspace(0, L, p.n_diaphragms): ax.plot([xx, xx], [xs[0], xs[-1]], color="#DD6B20")
+        cw = g["Wc"]; ax.add_patch(Rectangle((0, -cw / 2), L, cw, fc="none", ec="#718096", ls="--"))
+        dim_h(ax, 0, L, -W / 2 - 0.9, f"Span L = {L:.2f} m", off=0.1, fs=9)
+        dim_v(ax, -W / 2, W / 2, -1.0, f"B = {W:.2f} m", ha="right", fs=9)
+        for a_, b_ in zip(xs[:-1], xs[1:]): dim_v(ax, a_, b_, L + 0.8, f"{b_-a_:.2f}")
+        ax.set_xlim(-4, L + 3); ax.set_ylim(-W / 2 - 2, W / 2 + 1); ax.set_aspect("equal"); ax.set_title(f"Plan - deck {W:.2f} m, carriageway {cw:.2f} m (dashed)")
+    elif view == VIEWS[3]:
+        ax = fig.add_subplot(111); top = p.depth + p.haunch + p.slab_t
+        ax.add_patch(Rectangle((-W / 2, p.depth + p.haunch), W, p.slab_t, fc="#BEE3F8", ec="k"))
+        for xg in xs:
+            ax.add_patch(Polygon(girder_outline(p) + [xg, 0], fc="#E2E8F0", ec="k"))
+            ax.add_patch(Rectangle((xg - p.bt / 2, p.depth), p.bt, p.haunch + 0.002, fc="#CBD5E0", ec="k", lw=0.6, zorder=3))
+        fw, bw = p.footpath_w, p.barrier_w; zt = top
+        for s in (-1, 1):
+            xb = s * (W / 2 - bw / 2); ax.add_patch(Rectangle((xb - bw / 2, zt), bw, 1.0, fc="#A0AEC0", ec="k"))
+            ax.add_patch(Rectangle((s * (W / 2 - bw - fw / 2) - fw / 2, zt), fw, p.footpath_t, fc="#CBD5E0", ec="k"))
+        ax.add_patch(Rectangle((-g["Wc"] / 2, zt), g["Wc"], .03, fc="#2D3748"))
+        for i in range(p.n_lanes):
+            xl = -g["Wc"] / 2 + p.lane_w * (i + .5)
+            ax.annotate(f"L{i+1}", (xl, zt + .25), ha="center", fontsize=8)
+        yd = -0.25
+        dim_h(ax, -W / 2, W / 2, yd - 0.35, f"Deck width B = {W:.2f} m", off=0.03, fs=9)
+        for a_, b_ in zip(xs[:-1], xs[1:]): dim_h(ax, a_, b_, yd, f"S = {b_-a_:.2f}", off=0.03)
+        dim_h(ax, -W / 2, xs[0], yd, f"{g['overhang']:.2f}", off=0.03); dim_h(ax, xs[-1], W / 2, yd, f"{g['overhang']:.2f}", off=0.03)
+        dim_v(ax, 0, p.depth, xs[-1] + p.bt / 2 + 0.2, f"D = {p.depth:.2f}")
+        dim_v(ax, p.depth + p.haunch, zt, W / 2 - 0.2, f"{p.slab_t*1000:.0f} mm", ha="right")
+        dim_h(ax, -g["Wc"] / 2, g["Wc"] / 2, zt + 1.05, f"Carriageway {g['Wc']:.2f} m ({p.n_lanes} x {p.lane_w:.1f})", off=0.03)
+        ax.set_xlim(-W / 2 - .8, W / 2 + .8); ax.set_ylim(-1.0, zt + 1.6); ax.set_aspect("equal")
+        ax.set_title(f"Cross-section: {g['n_girders']} girders @ {g['spacing']:.2f} m, {p.n_lanes} lanes, overhang {g['overhang']:.2f} m")
+    else:
+        ax = fig.add_subplot(111)
+        ax.add_patch(Polygon(girder_outline(p), fc="#E2E8F0", ec="k"))
+        P = r["prestress"]
+        for xc, yv in zip(P["duct_xs"], P["duct_ys"]):
+            ax.add_patch(Circle((xc, yv), p.duct_d / 2, fc="#E53E3E", ec="k"))
+        ax.axhline(r["section"]["yb"], color="g", ls=":"); ax.text(p.bt / 2, r["section"]["yb"], " centroid", color="g", fontsize=8)
+        D_, tb_, tf_ = p.depth, p.tb, p.tf; yb_ = r["section"]["yb"]
+        m = p.bt / 2 + 0.25
+        dim_h(ax, -p.bt / 2, p.bt / 2, D_ + 0.08, f"top flange width {p.bt*1000:.0f}", off=0.02)
+        dim_h(ax, -p.bb / 2, p.bb / 2, -0.12, f"bottom flange width {p.bb*1000:.0f}", off=-0.07)
+        dim_h(ax, -p.tw / 2, p.tw / 2, D_ / 2, f"web {p.tw*1000:.0f}", off=0.03)
+        dim_v(ax, D_ - 0.4 * tf_, D_, -m, f"{0.4*tf_*1000:.0f} (edge)", ha="right")
+        dim_v(ax, D_ - tf_, D_, p.bt / 2 + 0.12, f"tf = {tf_*1000:.0f}")
+        dim_v(ax, 0, 0.4 * tb_, -m, f"{0.4*tb_*1000:.0f} (edge)", ha="right")
+        dim_v(ax, 0, tb_, p.bb / 2 + 0.12, f"tb = {tb_*1000:.0f}")
+        dim_v(ax, 0, D_, m + 0.3, f"D = {D_*1000:.0f}", ha="left")
+        dim_v(ax, 0, yb_, -m - 0.55, f"ybot = {yb_*1000:.0f}", ha="right")
+        for xc, yv in zip(P["duct_xs"], P["duct_ys"]):
+            ax.text(xc + p.duct_d / 2 + 0.03, yv, f"{yv*1000:.0f}", fontsize=7, color=DIMC, va="center")
+        ax.text(-m - 0.55, -0.27, "all dimensions in mm; duct centre heights from soffit", fontsize=7, color=DIMC, ha="left")
+        ax.set_xlim(-m - 1.1, m + 0.9); ax.set_ylim(-.35, D_ + .3); ax.set_aspect("equal")
+        nfl = min(p.flange_ducts, P['nc'])
+        ax.set_title(f"Girder section at midspan: {P['nc']} ducts x {P['strands_per_cable']} strands\nflange {nfl}, web {P['nc']-nfl} (below centroid);  e = {P['e_mid']:.3f} m")
+    if view != VIEWS[0]: fig.tight_layout()
+
+
+SWATCH = {"Concrete deck slab": "#C8D6EB", "PSC I-girders": "#4780CC", "Cross diaphragms": "#ED8C40",
+          "Abutments": "#C7C7C2", "Bearings": "#2E406B"}
+
+
+class ModelViewer(QWidget):
+    """Canvas + 'Show elements' panel. Used on the page and again inside the full-screen window."""
+    def __init__(self, get_results, fullscreen=False, state=None, on_fullscreen=None):
+        super().__init__(); self.get_results = get_results; self.fullscreen = fullscreen
+        self.angles = (30, -62); self.zoom = 1.25
+        lay = QVBoxLayout(self); row = QHBoxLayout(); self.combo = QComboBox(); self.combo.addItems(VIEWS)
+        row.addWidget(QLabel("View:")); row.addWidget(self.combo)
+        rb = QPushButton("Reset view"); rb.clicked.connect(self.reset_view); row.addWidget(rb)
+        row.addWidget(QLabel("<i>drag = rotate, wheel = zoom</i>")); row.addStretch()
+        fb = QPushButton("✕ Exit full screen" if fullscreen else "⛶ Full screen")
+        fb.clicked.connect(lambda: self.window().close() if fullscreen else on_fullscreen()); row.addWidget(fb)
+        lay.addLayout(row)
+        body = QHBoxLayout()
+        self.fig = Figure(figsize=(9, 5)); self.canvas = Canvas(self.fig); attach_interaction(self.canvas)
+        if fullscreen: lay.addWidget(NavBar(self.canvas, self))
+        body.addWidget(self.canvas, 1)
+        self.panel = QFrame(); self.panel.setObjectName("card")
+        pl = QVBoxLayout(self.panel); t = QLabel("Show elements"); t.setObjectName("card_title"); pl.addWidget(t)
+        self.checks = {}
+        for name in ELEMENTS:
+            h = QHBoxLayout(); cb = QCheckBox(name); cb.setChecked(True); cb.toggled.connect(lambda _=False: self.refresh())
+            self.checks[name] = cb
+            sw = QLabel(); sw.setFixedSize(12, 12)
+            sw.setStyleSheet(f"background:{SWATCH.get(name, 'transparent')};border:{'1px solid #718096' if name in SWATCH else 'none'};")
+            h.addWidget(sw); h.addWidget(cb, 1); pl.addLayout(h)
+        pl.addSpacing(6); gt = QLabel("Girders"); gt.setObjectName("card_title"); pl.addWidget(gt)
+        self.gbox = QVBoxLayout(); pl.addLayout(self.gbox); self.gchecks = []
+        row2 = QHBoxLayout()
+        for txt, val in (("All", True), ("None", False)):
+            b = QPushButton(txt); b.clicked.connect(lambda _=False, v=val: self.set_all(v)); row2.addWidget(b)
+        pl.addLayout(row2)
+        self.info = QLabel(); self.info.setWordWrap(True); self.info.setTextFormat(Qt.RichText)
+        self.info.setStyleSheet("background:#F8FAFC;border:1px solid #E2E8F0;padding:6px;font-size:11px;")
+        pl.addWidget(self.info); pl.addStretch()
+        self.panel_scroll = QScrollArea(); self.panel_scroll.setWidgetResizable(True); self.panel_scroll.setFixedWidth(250)
+        self.panel_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff); self.panel_scroll.setWidget(self.panel)
+        self.panel.setFixedWidth(228); self.panel.setMinimumHeight(0)
+        body.addWidget(self.panel_scroll); lay.addLayout(body)
+        self.canvas.setMinimumSize(300, 250)
+        if state: self.set_state(state)
+        self.combo.currentIndexChanged.connect(lambda _=0: self.refresh())
+
+    # ----- state
+    def get_state(self):
+        f = self.fig
+        ang = (f._main3d.elev, f._main3d.azim) if getattr(f, "_main3d", None) is not None else self.angles
+        return dict(view=self.combo.currentIndex(), checks={k: c.isChecked() for k, c in self.checks.items()},
+                    girders=[c.isChecked() for c in self.gchecks], angles=ang, zoom=getattr(f, "_zoom", self.zoom))
+
+    def set_state(self, st):
+        self.combo.blockSignals(True); self.combo.setCurrentIndex(st["view"]); self.combo.blockSignals(False)
+        for k, v in st["checks"].items(): self.checks[k].blockSignals(True); self.checks[k].setChecked(v); self.checks[k].blockSignals(False)
+        self._pending_girders = st.get("girders"); self.angles = tuple(st["angles"]); self.zoom = st["zoom"]
+
+    def reset_view(self):
+        self.angles = (30, -62); self.zoom = 1.25; self.fig._main3d = None; self.refresh(use_saved=False)
+
+    def set_all(self, v):
+        for cb in list(self.checks.values()) + self.gchecks: cb.blockSignals(True); cb.setChecked(v); cb.blockSignals(False)
+        self.refresh()
+
+    def _sync_girders(self, n):
+        if len(self.gchecks) == n: return
+        keep = getattr(self, "_pending_girders", None); self._pending_girders = None
+        while self.gbox.count():
+            w = self.gbox.takeAt(0).widget()
+            if w: w.deleteLater()
+        self.gchecks = []
+        for i in range(n):
+            cb = QCheckBox(f"Girder G{i + 1}"); cb.setChecked(True if not keep or i >= len(keep) else keep[i])
+            cb.toggled.connect(lambda _=False: self.refresh()); self.gbox.addWidget(cb); self.gchecks.append(cb)
+
+    def refresh(self, use_saved=True):
+        r = self.get_results()
+        if r is None: return
+        g = r["geom"]; p = _inp(r)
+        self._sync_girders(g["n_girders"])
+        f = self.fig
+        if use_saved and getattr(f, "_main3d", None) is not None and hasattr(f._main3d, "elev"):
+            self.angles = (f._main3d.elev, f._main3d.azim); self.zoom = f._zoom
+        is3d = self.combo.currentText() == VIEWS[0]
+        self.panel_scroll.setVisible(is3d)
+        show = {k: cb.isChecked() for k, cb in self.checks.items()}; show["_girders"] = [c.isChecked() for c in self.gchecks]
+        draw_view(f, self.combo.currentText(), r, show, self.angles, self.zoom)
+        self.info.setVisible(show["Geometry box"])
+        self.info.setText(f"<b>Bridge geometry</b><br>Span L = {g['L']:.2f} m<br>Girders = {g['n_girders']} @ {g['spacing']:.2f} m<br>"
+                          f"Deck width B = {g['W']:.2f} m<br>Girder depth = {p.depth:.3f} m<br>Slab = {p.slab_t:.2f} m<br>"
+                          f"Lanes = {p.n_lanes} × {p.lane_w:.1f} m<br><i>Vertical scale exaggerated;<br>barriers not drawn in 3D</i>")
+        self.canvas.draw_idle()
+
 
 class Model3DPage(QWidget):
-    def __init__(self, main_window):
-        super().__init__()
-        self.main_window = main_window 
-        
-        # Default Bridge Parameters
-        self.L = 33.0
-        self.num_g = 4
-        self.spacing = 2.75
-        self.depth = 2.0
-        self.tw = 0.30
-        self.tf = 0.20
-        self.bf = 0.80
-        self.f_ck = "M50"
-        
-        self.show_grid = False
-        self.show_dims = False
-        self.current_view_mode = "3D" 
-        self.current_elev = 20
-        self.current_azim = -55
-        self.zoom_factor = 1.0  
-        
-        self.build_ui()
+    def __init__(self, main):
+        super().__init__(); self.main = main
+        lay = QVBoxLayout(self); lay.setContentsMargins(0, 0, 0, 0)
+        self.viewer = ModelViewer(lambda: self.main.results, on_fullscreen=self.open_fullscreen); lay.addWidget(self.viewer)
 
-    def build_ui(self):
-        main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(0, 0, 15, 0)
-        main_layout.setSpacing(15)
+    def refresh(self):
+        self.viewer.refresh()
 
-        cad_split = QHBoxLayout()
-        cad_split.setSpacing(15)
-
-        # --- LEFT PANEL (Viewport & Toolbars) ---
-        self.viewport_layout = QVBoxLayout()
-        self.viewport_layout.setSpacing(10)
-        
-        # Top Toolbar (Views)
-        v_toolbar_top = QHBoxLayout()
-        v_toolbar_top.setSpacing(8)
-        
-        self.view_btns = {}
-        b_3d = QPushButton("3D VIEW")
-        b_top = QPushButton("⌖ TOP")
-        b_front = QPushButton("⚄ FRONT")
-        b_side = QPushButton("⧉ SIDE")
-        b_bridge_sec = QPushButton("◩ BRIDGE SECTION")
-        b_girder_sec = QPushButton("⌶ GIRDER SECTION")
-        
-        self.view_btns['3D'] = b_3d; self.view_btns['TOP'] = b_top
-        self.view_btns['FRONT'] = b_front; self.view_btns['SIDE'] = b_side
-        self.view_btns['BRIDGE_SEC'] = b_bridge_sec; self.view_btns['GIRDER_SEC'] = b_girder_sec
-        
-        for btn in self.view_btns.values():
-            btn.setObjectName("toolbar_btn")
-        b_3d.setObjectName("toolbar_btn_active")
-        
-        b_3d.clicked.connect(lambda: self.set_view("3D", 20, -55))
-        b_top.clicked.connect(lambda: self.set_view("TOP", 90, -90))
-        b_front.clicked.connect(lambda: self.set_view("FRONT", 0, -90))
-        b_side.clicked.connect(lambda: self.set_view("SIDE", 0, 0))
-        b_bridge_sec.clicked.connect(lambda: self.set_view("BRIDGE_SEC", 0, 0))
-        b_girder_sec.clicked.connect(lambda: self.set_view("GIRDER_SEC", 0, 0))
-
-        v_toolbar_top.addWidget(b_3d); v_toolbar_top.addWidget(b_top)
-        v_toolbar_top.addWidget(b_front); v_toolbar_top.addWidget(b_side)
-        v_toolbar_top.addWidget(b_bridge_sec); v_toolbar_top.addWidget(b_girder_sec)
-        v_toolbar_top.addStretch()
-        
-        # Bottom Toolbar (Tools & Navigation)
-        v_toolbar_bot = QHBoxLayout()
-        v_toolbar_bot.setSpacing(8)
-        
-        self.b_dim = QPushButton("↔ SHOW DIMENSIONS"); self.b_dim.setCheckable(True)
-        self.b_grid = QPushButton("▦ GRID"); self.b_grid.setCheckable(True)
-        
-        b_pan = QPushButton("✋ PAN")
-        b_zoom_rect = QPushButton("🔎 ZOOM BOX")
-        b_zoom_in = QPushButton("🔍 ZOOM IN")
-        b_zoom_out = QPushButton("🔍 ZOOM OUT")
-        b_fs = QPushButton("🖵 FULL SCREEN")
-        b_export = QPushButton("📷 EXPORT IMAGE")
-        
-        for btn in [self.b_dim, self.b_grid, b_pan, b_zoom_rect, b_zoom_in, b_zoom_out, b_fs, b_export]:
-            btn.setObjectName("toolbar_btn")
-        
-        self.b_dim.clicked.connect(self.toggle_dims)
-        self.b_grid.clicked.connect(self.toggle_grid)
-        b_zoom_in.clicked.connect(self.zoom_in)
-        b_zoom_out.clicked.connect(self.zoom_out)
-        b_fs.clicked.connect(self.toggle_fullscreen)
-        b_export.clicked.connect(self.export_image)
-        
-        v_toolbar_bot.addWidget(self.b_dim); v_toolbar_bot.addWidget(self.b_grid)
-        v_toolbar_bot.addSpacing(10)
-        v_toolbar_bot.addWidget(b_pan); v_toolbar_bot.addWidget(b_zoom_rect)
-        v_toolbar_bot.addSpacing(10)
-        v_toolbar_bot.addWidget(b_zoom_in); v_toolbar_bot.addWidget(b_zoom_out)
-        v_toolbar_bot.addStretch()
-        v_toolbar_bot.addWidget(b_fs); v_toolbar_bot.addWidget(b_export)
-
-        self.viewport_layout.addLayout(v_toolbar_top)
-        self.viewport_layout.addLayout(v_toolbar_bot)
-        
-        # Matplotlib Canvas Frame
-        self.canvas_frame = QFrame()
-        self.canvas_frame.setObjectName("card")
-        self.canvas_frame.setStyleSheet("background-color: #F8FAFC;") 
-        self.canvas_frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        
-        cl_canvas = QVBoxLayout(self.canvas_frame)
-        cl_canvas.setContentsMargins(0, 0, 0, 0)
-        cl_canvas.setSpacing(0)
-        
-        self.fig3d = Figure(figsize=(8, 5), facecolor='#F8FAFC')
-        self.canvas3d = FigureCanvas(self.fig3d)
-        self.canvas3d.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        
-        self.fig3d.canvas.mpl_connect('scroll_event', self.on_scroll)
-        
-        self.mpl_toolbar = NavigationToolbar2QT(self.canvas3d, self)
-        self.mpl_toolbar.hide() 
-        b_pan.clicked.connect(self.mpl_toolbar.pan)
-        b_zoom_rect.clicked.connect(self.mpl_toolbar.zoom)
-        
-        cl_canvas.addWidget(self.canvas3d)
-        
-        status_bar = QLabel("  ✅  Live Geometry Sync Active   |   Use mouse wheel to zoom to cursor.")
-        status_bar.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        status_bar.setStyleSheet("background-color: #DEF7EC; color: #03543F; font-size: 12px; font-weight: bold; padding: 10px; border-bottom-left-radius: 6px; border-bottom-right-radius: 6px;")
-        cl_canvas.addWidget(status_bar)
-        
-        self.viewport_layout.addWidget(self.canvas_frame)
-
-        # --- RIGHT PANEL (Sidebar Properties) ---
-        sidebar_layout = QVBoxLayout()
-        sidebar_layout.setSpacing(15)
-        
-        c_prop = QFrame(); c_prop.setObjectName("card"); c_prop.setFixedWidth(280)
-        cl_prop = QVBoxLayout(c_prop)
-        h_prop = QLabel("📋 MODEL PROPERTIES"); h_prop.setObjectName("card_title"); h_prop.setStyleSheet("font-size: 13px;")
-        cl_prop.addWidget(h_prop); cl_prop.addSpacing(10)
-        
-        self.lbl_v_span = QLabel(f"{self.L:.2f} m")
-        self.lbl_v_gird = QLabel(f"{self.num_g}")
-        self.lbl_v_spac = QLabel(f"{self.spacing:.2f} m")
-        self.lbl_v_dep = QLabel(f"{self.depth:.2f} m")
-        self.lbl_v_wid = QLabel("10.25 m")
-        self.lbl_v_conc = QLabel(f"{self.f_ck}")
-        
-        cl_prop.addLayout(self.create_prop_row("Span Length, L", self.lbl_v_span))
-        cl_prop.addLayout(self.create_prop_row("Longitudinal Girders", self.lbl_v_gird))
-        cl_prop.addLayout(self.create_prop_row("Girder Spacing", self.lbl_v_spac))
-        cl_prop.addLayout(self.create_prop_row("Overall Girder Depth", self.lbl_v_dep))
-        cl_prop.addLayout(self.create_prop_row("Deck Width", self.lbl_v_wid))
-        cl_prop.addLayout(self.create_prop_row("Concrete Grade", self.lbl_v_conc))
-        sidebar_layout.addWidget(c_prop)
-        
-        c_comp = QFrame(); c_comp.setObjectName("card"); c_comp.setFixedWidth(280)
-        cl_comp = QVBoxLayout(c_comp)
-        h_comp = QLabel("🏗️ MODEL COMPONENTS"); h_comp.setObjectName("card_title"); h_comp.setStyleSheet("font-size: 13px;")
-        cl_comp.addWidget(h_comp); cl_comp.addSpacing(10)
-        
-        self.cb_deck = QCheckBox("Deck Slab"); self.cb_deck.setChecked(True)
-        self.cb_gird = QCheckBox("PSC I-Girders"); self.cb_gird.setChecked(True)
-        self.cb_abut = QCheckBox("Piers & Pile Foundations"); self.cb_abut.setChecked(True)
-        
-        self.cb_deck.stateChanged.connect(lambda: self.render_model())
-        self.cb_gird.stateChanged.connect(lambda: self.render_model())
-        self.cb_abut.stateChanged.connect(lambda: self.render_model())
-        
-        cl_comp.addWidget(self.cb_deck); cl_comp.addWidget(self.cb_gird)
-        cl_comp.addWidget(self.cb_abut)
-        sidebar_layout.addWidget(c_comp)
-        sidebar_layout.addStretch()
-        
-        cad_split.addLayout(self.viewport_layout, 7)
-        cad_split.addLayout(sidebar_layout, 3)
-        main_layout.addLayout(cad_split)
-
-        footer = QHBoxLayout()
-        back_btn = QPushButton("← Back to Loads"); back_btn.setObjectName("nav_back")
-        back_btn.clicked.connect(lambda: self.main_window.switch_page(2))
-        next_btn = QPushButton("Next: Analysis →"); next_btn.setObjectName("nav_next")
-        next_btn.clicked.connect(lambda: self.main_window.switch_page(4))
-        footer.addWidget(back_btn); footer.addStretch(); footer.addWidget(next_btn)
-        main_layout.addSpacing(10); main_layout.addLayout(footer)
-
-    def create_prop_row(self, label, value):
-        row = QHBoxLayout(); row.setContentsMargins(0, 0, 0, 0)
-        lbl = QLabel(label); lbl.setStyleSheet("color: #4A5568; font-size: 13px;")
-        value.setStyleSheet("color: #1A202C; font-size: 13px; font-weight: bold;")
-        value.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        row.addWidget(lbl); row.addWidget(value)
-        return row
-
-    def update_properties(self, L, num_g, spacing, depth, tw, tf, bf, f_ck):
-        self.L = L; self.num_g = num_g; self.spacing = spacing; self.depth = depth
-        self.tw = tw; self.tf = tf; self.bf = bf; self.f_ck = f_ck
-        
-        width = self.spacing * (self.num_g - 1) + 2.0
-        self.lbl_v_span.setText(f"{self.L:.2f} m")
-        self.lbl_v_gird.setText(f"{self.num_g}")
-        self.lbl_v_spac.setText(f"{self.spacing:.2f} m")
-        self.lbl_v_dep.setText(f"{self.depth:.2f} m")
-        self.lbl_v_wid.setText(f"{width:.2f} m")
-        self.lbl_v_conc.setText(f"{self.f_ck}")
-        self.render_model()
-
-    # ================= EVENT HANDLERS & FULLSCREEN =================
-
-    def toggle_fullscreen(self):
-        self.fs_dialog = QDialog(self.main_window)
-        self.fs_dialog.setWindowTitle("3D Model - Full Screen View")
-        self.fs_dialog.setWindowFlags(Qt.Window | Qt.FramelessWindowHint)
-        self.fs_dialog.showFullScreen() # True full screen across all monitors bounds
-        
-        layout = QVBoxLayout(self.fs_dialog)
-        layout.setContentsMargins(10, 10, 10, 10)
-        layout.setSpacing(10)
-        
-        top_bar = QHBoxLayout()
-        lbl = QLabel("STRUCTURAL SUITE Pro - Full Screen Mode")
-        lbl.setStyleSheet("font-size: 16px; font-weight: bold; color: #123B63;")
-        
-        close_btn = QPushButton("❌ EXIT FULL SCREEN")
-        close_btn.setObjectName("primary_btn")
-        close_btn.setStyleSheet("background-color: #E53E3E; color: white;")
-        close_btn.clicked.connect(self.fs_dialog.accept)
-        
-        top_bar.addWidget(lbl); top_bar.addStretch(); top_bar.addWidget(close_btn)
-        layout.addLayout(top_bar)
-        
-        layout.addWidget(self.canvas_frame) 
-        
-        self.fs_dialog.finished.connect(self.exit_fullscreen)
-        self.fs_dialog.exec()
-        
-    def exit_fullscreen(self):
-        self.viewport_layout.addWidget(self.canvas_frame)
-
-    def on_scroll(self, event):
-        if event.inaxes is None: return
-        scale = 0.8 if event.button == 'up' else 1.25
-        
-        if self.current_view_mode in ["BRIDGE_SEC", "GIRDER_SEC"]:
-            ax = event.inaxes
-            xdata, ydata = event.xdata, event.ydata
-            if xdata is None or ydata is None: return
-            
-            xlim = ax.get_xlim()
-            ylim = ax.get_ylim()
-            
-            new_width = (xlim[1] - xlim[0]) * scale
-            new_height = (ylim[1] - ylim[0]) * scale
-            
-            rel_x = (xdata - xlim[0]) / (xlim[1] - xlim[0])
-            rel_y = (ydata - ylim[0]) / (ylim[1] - ylim[0])
-            
-            ax.set_xlim([xdata - new_width * rel_x, xdata + new_width * (1 - rel_x)])
-            ax.set_ylim([ydata - new_height * rel_y, ydata + new_height * (1 - rel_y)])
-            self.canvas3d.draw_idle()
-        else:
-            self.zoom_factor *= scale
-            self.zoom_factor = max(0.1, min(self.zoom_factor, 10.0))
-            self.render_model()
-
-    # ================= VIEW & RENDERING LOGIC =================
-
-    def set_view(self, active_key, elev, azim):
-        self.current_view_mode = active_key
-        self.current_elev = elev
-        self.current_azim = azim
-        self.zoom_factor = 1.0  
-        for key, btn in self.view_btns.items():
-            btn.setObjectName("toolbar_btn_active" if key == active_key else "toolbar_btn")
-            btn.style().unpolish(btn); btn.style().polish(btn)
-        self.render_model()
-
-    def toggle_grid(self):
-        self.show_grid = self.b_grid.isChecked()
-        self.b_grid.setObjectName("toolbar_btn_active" if self.show_grid else "toolbar_btn")
-        self.b_grid.style().unpolish(self.b_grid); self.b_grid.style().polish(self.b_grid)
-        self.render_model()
-
-    def toggle_dims(self):
-        self.show_dims = self.b_dim.isChecked()
-        self.b_dim.setObjectName("toolbar_btn_active" if self.show_dims else "toolbar_btn")
-        self.b_dim.style().unpolish(self.b_dim); self.b_dim.style().polish(self.b_dim)
-        self.render_model()
-
-    def zoom_in(self):
-        self.zoom_factor *= 0.8  
-        self.render_model()
-
-    def zoom_out(self):
-        self.zoom_factor *= 1.25 
-        self.render_model()
-
-    def export_image(self):
-        file_path, _ = QFileDialog.getSaveFileName(self, "Save Model Image", "", "PNG Image (*.png);;JPEG Image (*.jpg)")
-        if file_path:
-            self.fig3d.savefig(file_path, dpi=300, bbox_inches='tight', facecolor='#F8FAFC')
-
-    def create_girder_polygon(self, x_offset, y_offset):
-        tf = self.tf; bf = self.bf; tw = self.tw; d = self.depth
-        pts = [
-            (x_offset - bf/2, y_offset), (x_offset + bf/2, y_offset),
-            (x_offset + bf/2, y_offset + 0.15), (x_offset + tw/2, y_offset + 0.35),
-            (x_offset + tw/2, y_offset + d - 0.35), (x_offset + bf/2, y_offset + d - 0.15),
-            (x_offset + bf/2, y_offset + d), (x_offset - bf/2, y_offset + d),
-            (x_offset - bf/2, y_offset + d - 0.15), (x_offset - tw/2, y_offset + d - 0.35),
-            (x_offset - tw/2, y_offset + 0.35), (x_offset - bf/2, y_offset + 0.15)
-        ]
-        return patches.Polygon(pts, closed=True, facecolor='#D9E2EC', edgecolor='#123B63', linewidth=1.5, zorder=3)
-
-    def draw_cylinder_3d(self, ax, x, y, z, h, r, color):
-        z_vals = np.linspace(z, z + h, 2)
-        theta = np.linspace(0, 2 * np.pi, 16)
-        theta_grid, z_grid = np.meshgrid(theta, z_vals)
-        x_grid = r * np.cos(theta_grid) + x
-        y_grid = r * np.sin(theta_grid) + y
-        ax.plot_surface(x_grid, y_grid, z_grid, color=color, alpha=1.0, shade=True, edgecolor='none')
-
-    def draw_bridge_section_2d(self, ax):
-        width = self.spacing * (self.num_g - 1) + 2.0
-        mid_x = 0
-        total_foundation_depth = 15.85
-        mid_y = (self.depth - total_foundation_depth) / 2 if self.cb_abut.isChecked() else self.depth / 2
-        max_range_x = (width / 2 + 3) * self.zoom_factor
-        max_range_y = (total_foundation_depth + self.depth + 4) / 2 * self.zoom_factor if self.cb_abut.isChecked() else (self.depth / 2 + 3) * self.zoom_factor
-        
-        ax.set_xlim(mid_x - max_range_x, mid_x + max_range_x)
-        ax.set_ylim(mid_y - max_range_y, mid_y + max_range_y)
-
-        if self.cb_abut.isChecked():
-            cap_h = 1.2; col_h = 5.0; pcap_h = 1.5; pile_h = 8.0; z_bear = -0.15
-            for i in range(self.num_g):
-                y_center = -width/2 + 1.0 + (i * self.spacing)
-                ax.add_patch(patches.Rectangle((y_center - 0.2, z_bear), 0.4, 0.15, facecolor='#38A169', edgecolor='black', zorder=2))
-
-            ax.add_patch(patches.Rectangle((-width/2 - 0.5, z_bear - cap_h), width + 1, cap_h, facecolor='#CBD5E0', edgecolor='#A0AEC0', lw=1.5, zorder=1))
-            ax.add_patch(patches.Rectangle((-1.2, z_bear - cap_h - col_h), 2.4, col_h, facecolor='#A0AEC0', edgecolor='grey', lw=1.5, zorder=1))
-            
-            pw = width * 0.6
-            z_pcap_top = z_bear - cap_h - col_h
-            ax.add_patch(patches.Rectangle((-pw/2, z_pcap_top - pcap_h), pw, pcap_h, facecolor='#94A3B8', edgecolor='grey', lw=1.5, zorder=1))
-            
-            ny = 4; space_y = (pw - 1.0) / (ny - 1); z_pile_top = z_pcap_top - pcap_h
-            for j in range(ny):
-                pile_y = -pw/2 + 0.5 + j * space_y
-                ax.add_patch(patches.Rectangle((pile_y - 0.3, z_pile_top - pile_h), 0.6, pile_h, facecolor='#718096', edgecolor='black', zorder=1))
-
-        if self.cb_deck.isChecked():
-            ax.add_patch(patches.Rectangle((-width/2, self.depth), width, 0.25, facecolor='#CBD5E0', edgecolor='#4A5568', linewidth=1.5, zorder=3))
-            ax.add_patch(patches.Rectangle((-width/2, self.depth + 0.25), 0.5, 0.8, facecolor='#A0AEC0', edgecolor='#4A5568', zorder=3))
-            ax.add_patch(patches.Rectangle((width/2 - 0.5, self.depth + 0.25), 0.5, 0.8, facecolor='#A0AEC0', edgecolor='#4A5568', zorder=3))
-
-        if self.cb_gird.isChecked():
-            for i in range(self.num_g):
-                x_center = -width/2 + 1.0 + (i * self.spacing)
-                ax.add_patch(self.create_girder_polygon(x_center, 0))
-                ax.text(x_center, self.depth / 2, f"G{i+1}", ha='center', va='center', weight='bold', color='white', zorder=4)
-
-        if self.show_dims:
-            ax.annotate(f"Overall Deck Width = {width:.2f} m", xy=(-width/2, self.depth + 1.8), xytext=(width/2, self.depth + 1.8),
-                        arrowprops=dict(arrowstyle="<|-|>", color='#3182CE', lw=1.5), ha='center', va='bottom', color='#3182CE', weight='bold')
-            for i in range(self.num_g - 1):
-                x1 = -width/2 + 1.0 + (i * self.spacing)
-                x2 = x1 + self.spacing
-                ax.annotate(f"{self.spacing:.2f} m", xy=(x1, self.depth + 0.5), xytext=(x2, self.depth + 0.5),
-                            arrowprops=dict(arrowstyle="<|-|>", color='#E53E3E', lw=1.5), ha='center', va='bottom', color='#E53E3E', weight='bold')
-
-    def draw_girder_section_2d(self, ax):
-        mid_x = 0; mid_y = self.depth / 2
-        max_range_x = 2 * self.zoom_factor
-        max_range_y = (self.depth / 2 + 1) * self.zoom_factor
-        ax.set_xlim(mid_x - max_range_x, mid_x + max_range_x)
-        ax.set_ylim(mid_y - max_range_y, mid_y + max_range_y)
-
-        ax.add_patch(self.create_girder_polygon(0, 0))
-        
-        tendon_y = [0.1, 0.1, 0.4, 0.8, 1.2, self.depth - 0.1]
-        tendon_x = [0.2, -0.2, 0, 0, 0, 0]
-        tendon_labels = ["O1", "O2", "O3", "O4", "O5", "O6"]
-        
-        for tx, ty, lbl in zip(tendon_x, tendon_y, tendon_labels):
-            ax.add_patch(patches.Circle((tx, ty), 0.04, facecolor='white', edgecolor='#E53E3E', linewidth=1.5, zorder=3))
-            x_shift = -0.15 if tx < 0 else 0.15
-            ax.text(tx + x_shift, ty, lbl, va='center', ha='center', fontsize=10, color='#1A202C', weight='bold', zorder=4)
-
-        if self.show_dims:
-            ax.annotate(f"Overall Depth, D = {self.depth:.2f} m", xy=(-self.bf/2 - 0.3, 0), xytext=(-self.bf/2 - 0.3, self.depth),
-                        arrowprops=dict(arrowstyle="<|-|>", color='#3182CE', lw=1.5), ha='right', va='center', color='#3182CE', weight='bold')
-            ax.annotate(f"Top Flange ({self.tf*1000:.0f} mm)", xy=(self.bf/2 - 0.1, self.depth - 0.1), xytext=(self.bf/2 + 0.4, self.depth - 0.1),
-                        arrowprops=dict(arrowstyle="->", color='black', lw=1.5), va='center', weight='bold')
-            ax.annotate(f"Web ({self.tw*1000:.0f} mm)", xy=(self.tw/2, self.depth / 2), xytext=(self.bf/2 + 0.4, self.depth / 2),
-                        arrowprops=dict(arrowstyle="->", color='black', lw=1.5), va='center', weight='bold')
-            ax.annotate(f"Bottom Flange ({self.bf*1000:.0f} mm)", xy=(self.bf/2 - 0.1, 0.1), xytext=(self.bf/2 + 0.4, 0.1),
-                        arrowprops=dict(arrowstyle="->", color='black', lw=1.5), va='center', weight='bold')
-
-    def render_model(self):
-        self.fig3d.clear()
-        
-        if self.current_view_mode in ["BRIDGE_SEC", "GIRDER_SEC"]:
-            ax = self.fig3d.add_subplot(111)
-            ax.set_facecolor('#F8FAFC')
-            ax.set_aspect('equal', adjustable='datalim')
-            
-            if not self.show_grid:
-                ax.axis('off')
-            else:
-                ax.grid(True, linestyle=':', alpha=0.6)
-                
-            if self.current_view_mode == "BRIDGE_SEC":
-                self.draw_bridge_section_2d(ax)
-            else:
-                self.draw_girder_section_2d(ax)
-            
-            self.fig3d.subplots_adjust(left=0.0, right=1.0, bottom=0.0, top=1.0)
-            self.canvas3d.draw()
-            return
-
-        ax = self.fig3d.add_subplot(111, projection='3d')
-        ax.set_facecolor('#F8FAFC')
-        ax.view_init(elev=self.current_elev, azim=self.current_azim)
-        
-        width = self.spacing * (self.num_g - 1) + 2.0
-        
-        # Calculate true data bounding box
-        x_range = self.L + 4
-        y_range = width + 4
-        mid_x = self.L / 2
-        mid_y = 0
-        
-        if self.cb_abut.isChecked():
-            total_foundation_depth = 15.85
-            mid_z = (self.depth - total_foundation_depth) / 2
-            z_range = self.depth + total_foundation_depth + 4
-        else:
-            mid_z = self.depth / 2
-            z_range = self.depth + 4
-            
-        # 1. Apply true limits scaled identically by zoom_factor
-        ax.set_xlim(mid_x - (x_range/2 * self.zoom_factor), mid_x + (x_range/2 * self.zoom_factor))
-        ax.set_ylim(mid_y - (y_range/2 * self.zoom_factor), mid_y + (y_range/2 * self.zoom_factor))
-        ax.set_zlim(mid_z - (z_range/2 * self.zoom_factor), mid_z + (z_range/2 * self.zoom_factor))
-        
-        # 2. Force 1:1 Aspect Ratio to actual dimensions (Prevents Axis Distortion & Stretching)
-        ax.set_box_aspect((x_range, y_range, z_range))
-        
-        if self.show_grid:
-            ax.set_axis_on()
-            ax.grid(True, linestyle=':', alpha=0.6)
-            ax.xaxis.pane.fill = False
-            ax.yaxis.pane.fill = False
-            ax.zaxis.pane.fill = False
-        else:
-            ax.set_axis_off()
-        
-        if self.cb_abut.isChecked():
-            cap_h = 1.2; col_h = 5.0; pcap_h = 1.5; pile_h = 8.0; z_bear = -0.15
-            
-            # Place piers 1.0m inwards so they sit undeniably underneath the girders
-            bearing_offset = 1.0 
-            for px in [bearing_offset, self.L - bearing_offset]:
-                for i in range(self.num_g):
-                    y_center = -width/2 + 1.0 + (i * self.spacing)
-                    self.draw_cylinder_3d(ax, px, y_center, z_bear, 0.15, 0.2, '#38A169')
-                
-                ax.bar3d(px - 1.0, -width/2 - 0.5, z_bear - cap_h, 2.0, width + 1, cap_h, color='#CBD5E0', edgecolor='grey', shade=True)
-                self.draw_cylinder_3d(ax, px, 0, z_bear - cap_h - col_h, col_h, 1.2, '#A0AEC0')
-                
-                pw = width * 0.6; pl = 4.0; z_pcap_top = z_bear - cap_h - col_h
-                ax.bar3d(px - pl/2, -pw/2, z_pcap_top - pcap_h, pl, pw, pcap_h, color='#94A3B8', edgecolor='grey', shade=True)
-                
-                nx, ny = 4, 4; space_x = (pl - 1.0) / (nx - 1); space_y = (pw - 1.0) / (ny - 1); z_pile_top = z_pcap_top - pcap_h
-                for i in range(nx):
-                    for j in range(ny):
-                        pile_x = px - pl/2 + 0.5 + i * space_x
-                        pile_y = -pw/2 + 0.5 + j * space_y
-                        self.draw_cylinder_3d(ax, pile_x, pile_y, z_pile_top - pile_h, pile_h, 0.3, '#718096')
-
-        # 3. Segment the Girders and Deck (Fixes Matplotlib Z-Order Sorting Bug)
-        segments = max(1, int(self.L / 3.0)) 
-        seg_L = self.L / segments
-        
-        for s in range(segments):
-            seg_x = s * seg_L
-            
-            if self.cb_gird.isChecked():
-                tf = self.tf; bf = self.bf; tw = self.tw
-                hw = self.depth - (2 * tf)
-                for i in range(self.num_g):
-                    y_center = -width/2 + 1.0 + (i * self.spacing)
-                    ax.bar3d(seg_x, y_center - bf/2, 0, seg_L, bf, tf, color='#1E5A8A', alpha=1.0, edgecolor='#123B63', linewidth=0.3)
-                    ax.bar3d(seg_x, y_center - tw/2, tf, seg_L, tw, hw, color='#2C7BB6', alpha=1.0, edgecolor='#123B63', linewidth=0.3)
-                    ax.bar3d(seg_x, y_center - bf/2, tf + hw, seg_L, bf, tf, color='#1E5A8A', alpha=1.0, edgecolor='#123B63', linewidth=0.3)
-
-            if self.cb_deck.isChecked():
-                deck_thickness = 0.25
-                ax.bar3d(seg_x, -width/2, self.depth, seg_L, width, deck_thickness, color='#CBD5E0', alpha=0.9, edgecolor='grey')
-
-        if self.show_dims:
-            z_dim = self.depth + 3.0
-            y_offset = width/2 + 2.0
-            x_offset = -3.0
-
-            ax.plot([0, self.L], [y_offset, y_offset], [z_dim, z_dim], color='#E53E3E', linestyle='-', marker='|', markersize=12, linewidth=2)
-            ax.text(self.L/2, y_offset + 0.5, z_dim, f"Span = {self.L} m", color='#E53E3E', ha='center', weight='bold', fontsize=11)
-            
-            ax.plot([x_offset, x_offset], [-width/2, width/2], [z_dim, z_dim], color='#3182CE', linestyle='-', marker='|', markersize=12, linewidth=2)
-            ax.text(x_offset - 1.0, 0, z_dim, f"Deck Width = {width} m", color='#3182CE', ha='center', weight='bold', fontsize=11)
-
-        self.fig3d.subplots_adjust(left=0, right=1, bottom=0, top=1)
-        self.canvas3d.draw()
+    def open_fullscreen(self):
+        if self.main.results is None: return
+        dlg = QDialog(self.main); dlg.setWindowTitle("3D model - full screen"); dlg.setStyleSheet(self.main.styleSheet())
+        l = QVBoxLayout(dlg); mv = ModelViewer(lambda: self.main.results, fullscreen=True, state=self.viewer.get_state()); l.addWidget(mv)
+        mv.refresh(use_saved=False); dlg.showFullScreen(); dlg.exec()
+        self.viewer.set_state(mv.get_state()); self.viewer.refresh(use_saved=False)

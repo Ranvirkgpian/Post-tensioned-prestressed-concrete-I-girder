@@ -1,389 +1,265 @@
+"""STRUCTURAL SUITE Pro | PSC Bridge Design  -  main window.
+Every number shown anywhere comes from BridgeEngine.run(); this file only collects inputs."""
 import sys
-from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
-                               QHBoxLayout, QLabel, QLineEdit, QComboBox, QPushButton, 
-                               QStackedWidget, QFrame, QTableWidget, QTableWidgetItem,
-                               QHeaderView, QScrollArea, QGridLayout, QTextEdit, QDateEdit, QSizePolicy)
-from PySide6.QtCore import Qt, QDate
-from bridge_engine import BridgeEngine
+from PySide6.QtWidgets import (QFileDialog, QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
+                               QComboBox, QPushButton, QStackedWidget, QFrame, QFileDialog, QScrollArea, QGridLayout,
+                               QTextEdit, QSizePolicy, QMessageBox)
+from PySide6.QtCore import Qt
+from bridge_engine import BridgeEngine, BridgeInputs, InputError, VEHICLES
+from ui_analysis import AnalysisPage
+from ui_results import ResultsPage
+from ui_report import ReportPage
 from ui_3d_model import Model3DPage
 
-# =====================================================================
-# STYLESHEET (Professional Engineering Theme)
-# =====================================================================
 QSS = """
 QMainWindow { background-color: #F0F4F8; font-family: "Segoe UI", Arial, sans-serif; }
 #sidebar { background-color: #0F2546; }
-#sidebar QPushButton { background-color: transparent; color: #A0AEC0; text-align: left; padding: 15px 25px; font-size: 13px; font-weight: bold; border: none; }
+#sidebar QPushButton { background: transparent; color: #A0AEC0; text-align: left; padding: 15px 25px; font-size: 13px; font-weight: bold; border: none; }
 #sidebar QPushButton:hover { color: #FFFFFF; background-color: #1A365D; }
 #sidebar QPushButton:checked { color: #FFFFFF; background-color: #1A365D; border-left: 4px solid #3182CE; }
-QLabel#page_title { font-size: 24px; font-weight: 800; color: #1A202C; text-transform: uppercase;}
-QLabel#page_subtitle { font-size: 13px; color: #718096; margin-bottom: 10px;}
+QLabel#page_title { font-size: 24px; font-weight: 800; color: #1A202C; }
+QLabel#page_subtitle { font-size: 13px; color: #718096; }
 QLabel#card_title { font-size: 16px; font-weight: bold; color: #123B63; }
 QLabel#card_subtitle { font-size: 12px; color: #718096; }
-QLabel#field_label { font-size: 12px; font-weight: 500; color: #4A5568; }
-QLabel#req_star { color: #E53E3E; }
-.QFrame#card { background-color: #FFFFFF; border-radius: 6px; border: 1px solid #E2E8F0; }
-QLineEdit, QComboBox, QDateEdit { min-height: 36px; padding: 4px 12px; border: 1px solid #CBD5E0; border-radius: 4px; background-color: #FFFFFF; font-size: 13px; color: #2D3748; }
-QTextEdit { min-height: 60px; padding: 8px 12px; border: 1px solid #CBD5E0; border-radius: 4px; background-color: #FFFFFF; font-size: 13px; color: #2D3748; }
-QLineEdit:focus, QComboBox:focus, QDateEdit:focus, QTextEdit:focus { border: 1px solid #3182CE; }
-QComboBox::drop-down { border: none; }
-QTableWidget { background-color: white; border: 1px solid #E2E8F0; border-radius: 4px; gridline-color: #EDF2F7; }
-QHeaderView::section { background-color: #F8FAFC; color: #123B63; padding: 8px; border: none; border-bottom: 1px solid #E2E8F0; font-weight: bold; font-size: 12px; }
-QPushButton#primary_btn { background-color: #10B981; color: white; font-weight: bold; font-size: 13px; padding: 8px 20px; border-radius: 4px; }
+QLabel#field_label { font-size: 12px; color: #4A5568; }
+QFrame#card { background-color: #FFFFFF; border-radius: 6px; border: 1px solid #E2E8F0; }
+QLineEdit, QComboBox { min-height: 30px; padding: 2px 10px; border: 1px solid #CBD5E0; border-radius: 4px; background: #FFFFFF; font-size: 13px; color: #2D3748; }
+QLineEdit:focus, QComboBox:focus { border: 1px solid #3182CE; }
+QTableWidget { background: white; border: 1px solid #E2E8F0; gridline-color: #EDF2F7; }
+QHeaderView::section { background: #F8FAFC; color: #123B63; padding: 6px; border: none; border-bottom: 1px solid #E2E8F0; font-weight: bold; }
+QPushButton#primary_btn { background-color: #10B981; color: white; font-weight: bold; padding: 8px 20px; border-radius: 4px; }
 QPushButton#primary_btn:hover { background-color: #059669; }
-QPushButton#nav_next { background-color: #123B63; color: white; font-weight: bold; font-size: 13px; padding: 8px 20px; border-radius: 4px; }
-QPushButton#nav_next:hover { background-color: #1A365D; }
-QPushButton#nav_back { background-color: #F1F5F9; color: #A0AEC0; font-weight: bold; font-size: 13px; padding: 8px 20px; border-radius: 4px; border: 1px solid #E2E8F0; }
-QScrollArea { border: none; background-color: transparent; }
+QPushButton#nav_next { background-color: #123B63; color: white; font-weight: bold; padding: 8px 20px; border-radius: 4px; }
+QPushButton#nav_back { background-color: #F1F5F9; color: #4A5568; font-weight: bold; padding: 8px 20px; border-radius: 4px; border: 1px solid #E2E8F0; }
+QScrollArea { border: none; background: transparent; }
 """
+
+# group -> [(key, label, unit, default)]   (0 / blank where noted means "derive automatically")
+FIELDS = {
+    "Span & deck": [
+        ("L", "Effective span", "m", 33.0), ("n_girders", "Number of girders", "", 5),
+        ("spacing", "Girder spacing (0 = derive from deck width)", "m", 0.0),
+        ("n_lanes", "Number of traffic lanes", "", 3), ("lane_w", "Lane width", "m", 3.5),
+        ("footpath_w", "Footpath width (each side)", "m", 1.5), ("barrier_w", "Crash barrier width (each side)", "m", 0.5),
+        ("slab_t", "RCC deck slab thickness", "m", 0.25), ("haunch", "Haunch depth", "m", 0.05),
+        ("n_diaphragms", "Number of diaphragms", "", 5), ("dia_t", "Diaphragm thickness", "m", 0.30)],
+    "Girder section": [
+        ("depth", "Overall girder depth", "m", 2.0), ("bt", "Top flange width", "m", 1.0),
+        ("tf", "Top flange thickness", "m", 0.20), ("tw", "Web thickness", "m", 0.30),
+        ("bb", "Bottom flange width", "m", 0.80), ("tb", "Bottom flange thickness", "m", 0.30)],
+    "Materials": [
+        ("fck", "Girder concrete fck", "MPa", 50.0), ("deck_fck", "Deck concrete fck", "MPa", 35.0),
+        ("fy", "Reinforcement fy", "MPa", 500.0), ("fpk", "Strand fpk", "MPa", 1860.0),
+        ("strand_area", "Area per strand", "mm²", 140.0)],
+    "Prestressing": [
+        ("n_cables", "Number of cables (0 = auto-size)", "", 0), ("strands_per_cable", "Max strands per cable", "", 19), ("flange_ducts", "Ducts in bottom flange (rest in web)", "", 2),
+        ("duct_d", "Duct diameter", "m", 0.10), ("jack_ratio", "Jacking stress / fpk", "", 0.75),
+        ("mu", "Friction coefficient μ", "", 0.17), ("k_wobble", "Wobble k", "/m", 0.0015),
+        ("slip", "Anchorage draw-in", "m", 0.006), ("e_end", "Cable eccentricity at supports", "m", 0.0),
+        ("creep_phi", "Creep coefficient φ", "", 1.8), ("shrinkage", "Shrinkage strain", "", 3.5e-4),
+        ("relax1000", "Relaxation at 1000 h", "%", 2.5), ("transfer_ratio", "fci / fck at transfer", "", 0.75)],
+    "Superimposed loads": [
+        ("wc_t", "Wearing coat thickness", "m", 0.065), ("wc_gamma", "Wearing coat unit weight", "kN/m³", 22.0),
+        ("barrier_wt", "Crash barrier weight (each)", "kN/m", 10.0), ("fp_ll", "Footpath live load", "kN/m²", 4.0)],
+}
+INT_KEYS = {"flange_ducts", "n_girders", "n_lanes", "n_diaphragms", "n_cables", "strands_per_cable"}
+LOADS = ["Governing", "Class A", "Class B", "Class 70R Wheeled", "Class 70R Tracked"]
+
 
 class PSCBridgeApp(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("STRUCTURAL SUITE Pro | PSC Bridge Design")
-        self.setGeometry(50, 50, 1400, 900)
+        self.resize(1400, 860); self.setMinimumSize(900, 600)
         self.setStyleSheet(QSS)
-        
         self.engine = BridgeEngine()
-        self.sync_active = False # Prevents infinite loops during text sync
-        
-        main_widget = QWidget()
-        self.setCentralWidget(main_widget)
-        main_layout = QHBoxLayout(main_widget)
-        main_layout.setContentsMargins(0, 0, 0, 0)
-        main_layout.setSpacing(0)
+        self.results = None
+        self._cache_key = None
+        self.edits = {}
+        self.project = {}
 
-        # 1. SIDEBAR
-        sidebar = QFrame(); sidebar.setObjectName("sidebar"); sidebar.setFixedWidth(240)
-        sidebar_layout = QVBoxLayout(sidebar); sidebar_layout.setContentsMargins(0, 25, 0, 15); sidebar_layout.setSpacing(5)
-        
-        logo_layout = QHBoxLayout()
-        logo_icon = QLabel("🧠"); logo_icon.setStyleSheet("font-size: 28px; background: #0A192F; padding: 10px; border-radius: 8px; margin-left: 15px;")
-        logo_text = QLabel("STRUCTURAL\nSUITE Pro\nBridge Design"); logo_text.setStyleSheet("color: white; font-size: 14px; font-weight: bold;")
-        logo_layout.addWidget(logo_icon); logo_layout.addWidget(logo_text); logo_layout.addStretch()
-        sidebar_layout.addLayout(logo_layout); sidebar_layout.addSpacing(30)
+        root = QWidget(); self.setCentralWidget(root)
+        lay = QHBoxLayout(root); lay.setContentsMargins(0, 0, 0, 0); lay.setSpacing(0)
+        self.nav = []
 
-        self.nav_btns = []
-        nav_items = [("📄", "01   PROJECT"), ("📐", "02   GEOMETRY"), ("⚖️", "03   LOADS"), 
-                     ("🖥️", "04   3D MODEL"), ("📊", "05   ANALYSIS"), ("📋", "06   RESULTS"), ("📑", "07   REPORT")]
-        
-        for idx, (icon, text) in enumerate(nav_items):
-            btn = QPushButton(f"{icon}    {text}")
-            btn.setCheckable(True)
-            btn.clicked.connect(lambda checked, i=idx: self.switch_page(i))
-            self.nav_btns.append(btn)
-            sidebar_layout.addWidget(btn)
-            
-        sidebar_layout.addStretch()
-        
-        # 2. MAIN CONTENT
-        content_area = QWidget()
-        self.content_layout = QVBoxLayout(content_area)
-        self.content_layout.setContentsMargins(30, 25, 30, 25)
-        
-        header_layout = QHBoxLayout()
-        title_vbox = QVBoxLayout()
-        self.title_lbl = QLabel("PROJECT"); self.title_lbl.setObjectName("page_title")
-        self.subtitle_lbl = QLabel("Define project information and general details."); self.subtitle_lbl.setObjectName("page_subtitle")
-        title_vbox.addWidget(self.title_lbl); title_vbox.addWidget(self.subtitle_lbl)
-        header_layout.addLayout(title_vbox); header_layout.addStretch()
-        
-        analyze_btn = QPushButton("▶ RUN ANALYSIS"); analyze_btn.setObjectName("primary_btn")
-        analyze_btn.clicked.connect(self.run_analysis)
-        header_layout.addWidget(analyze_btn)
-        
-        self.content_layout.addLayout(header_layout)
-        self.content_layout.addSpacing(10)
-        
-        self.stack = QStackedWidget()
-        self.content_layout.addWidget(self.stack)
-        
-        self.build_pages()
-        
-        main_layout.addWidget(sidebar)
-        main_layout.addWidget(content_area)
+        area = QWidget(); self.cl = QVBoxLayout(area); self.cl.setContentsMargins(25, 20, 25, 20)
+        hd = QHBoxLayout(); tv = QVBoxLayout()
+        self.title = QLabel(); self.title.setObjectName("page_title")
+        self.sub = QLabel(); self.sub.setObjectName("page_subtitle")
+        tv.addWidget(self.title); tv.addWidget(self.sub); hd.addLayout(tv); hd.addStretch()
+        self.status = QLabel(""); self.status.setStyleSheet("color:#718096;font-size:12px;")
+        hd.addWidget(self.status)
+        self.cl.addLayout(hd)
+        self.stack = QStackedWidget(); self.cl.addWidget(self.stack)
+        ft = QHBoxLayout()
+        self.back_btn = QPushButton("← Back"); self.back_btn.setObjectName("nav_back")
+        self.next_btn = QPushButton("Next →"); self.next_btn.setObjectName("nav_next")
+        self.back_btn.setMinimumWidth(230); self.next_btn.setMinimumWidth(230)
+        self.back_btn.clicked.connect(lambda: self.switch_page(self.stack.currentIndex() - 1))
+        self.next_btn.clicked.connect(lambda: self.switch_page(self.stack.currentIndex() + 1))
+        self.save_btn = QPushButton("Save Project"); self.save_btn.setObjectName("nav_back"); self.save_btn.clicked.connect(self.save_project)
+        ft.addWidget(self.back_btn); ft.addStretch(); ft.addWidget(self.save_btn); ft.addWidget(self.next_btn); self.cl.addLayout(ft)
+        lay.addWidget(area)
+
+        self.stack.addWidget(self._home_page())
+        self.stack.addWidget(self._project_page())
+        self.stack.addWidget(self._form_page(["Span & deck", "Girder section", "Materials", "Prestressing"], 2))
+        self.stack.addWidget(self._loads_page())
+        self.model_page = Model3DPage(self); self.stack.addWidget(self.model_page)
+        self.analysis_page = AnalysisPage(self); self.stack.addWidget(self.analysis_page)
+        self.results_page = ResultsPage(self); self.stack.addWidget(self.results_page)
+        self.report_page = ReportPage(self); self.stack.addWidget(self.report_page)
         self.switch_page(0)
 
-    # --- UI HELPERS ---
-    def create_field(self, label_text, widget, is_required=False):
-        container = QWidget(); layout = QVBoxLayout(container); layout.setContentsMargins(0, 0, 0, 0); layout.setSpacing(6)
-        lbl_layout = QHBoxLayout(); lbl_layout.setContentsMargins(0, 0, 0, 0)
-        lbl = QLabel(label_text); lbl.setObjectName("field_label"); lbl_layout.addWidget(lbl)
-        if is_required:
-            star = QLabel("*"); star.setObjectName("req_star"); lbl_layout.addWidget(star)
-        lbl_layout.addStretch(); layout.addLayout(lbl_layout)
-        widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        layout.addWidget(widget); return container
+    # ---------- input handling ----------
+    def _card(self, title, sub=""):
+        c = QFrame(); c.setObjectName("card"); l = QVBoxLayout(c); l.setContentsMargins(18, 16, 18, 16)
+        h = QLabel(title); h.setObjectName("card_title"); l.addWidget(h)
+        if sub:
+            s = QLabel(sub); s.setObjectName("card_subtitle"); l.addWidget(s)
+        return c, l
 
-    def create_inline_field(self, label_text, widget, unit=""):
-        container = QWidget(); layout = QHBoxLayout(container); layout.setContentsMargins(0, 0, 0, 0)
-        lbl = QLabel(label_text); lbl.setObjectName("field_label"); lbl.setFixedWidth(130); layout.addWidget(lbl)
-        widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed); layout.addWidget(widget)
-        if unit:
-            u_lbl = QLabel(unit); u_lbl.setObjectName("field_label"); layout.addWidget(u_lbl)
-        return container
+    def _grid_group(self, group):
+        c, l = self._card(group)
+        g = QGridLayout(); g.setHorizontalSpacing(20); g.setVerticalSpacing(8)
+        for i, (key, label, unit, default) in enumerate(FIELDS[group]):
+            e = self.edits.get(key) or QLineEdit(f"{default:g}" if key not in INT_KEYS else str(default))
+            self.edits[key] = e
+            lb = QLabel(f"{label}" + (f" [{unit}]" if unit else "")); lb.setObjectName("field_label")
+            box = QVBoxLayout(); box.setSpacing(2); box.addWidget(lb); box.addWidget(e)
+            w = QWidget(); w.setLayout(box); box.setContentsMargins(0, 0, 0, 0)
+            g.addWidget(w, i // 2, i % 2)
+        l.addLayout(g); return c
 
-    def trigger_live_sync(self):
-        """Reactively updates 3D models and duped inputs across pages instantly"""
-        if self.sync_active: return
-        self.sync_active = True
-        
-        sender = self.sender()
+    def _scroll(self, widgets):
+        sc = QScrollArea(); sc.setWidgetResizable(True)
+        w = QWidget(); l = QVBoxLayout(w); l.setContentsMargins(0, 0, 12, 0); l.setSpacing(14)
+        for x in widgets: l.addWidget(x)
+        l.addStretch(); sc.setWidget(w); return sc
+
+    def _home_page(self):
+        w = QWidget(); l = QVBoxLayout(w); l.setAlignment(Qt.AlignCenter)
+        t = QLabel("STRUCTURAL SUITE Pro"); t.setStyleSheet("font-size:34px;font-weight:800;color:#123B63;"); t.setAlignment(Qt.AlignCenter)
+        s2 = QLabel("PSC Bridge Design  |  IRC:6 loads  |  IRC:112 limit-state design"); s2.setStyleSheet("font-size:14px;color:#718096;"); s2.setAlignment(Qt.AlignCenter)
+        new = QPushButton("＋  Start a New Project"); new.setObjectName("nav_next"); new.setMinimumSize(320, 56)
+        new.setStyleSheet("font-size:16px;"); new.clicked.connect(self.new_project)
+        opn = QPushButton("Open a Saved Project"); opn.setObjectName("nav_back"); opn.setMinimumSize(320, 48); opn.clicked.connect(self.open_project)
+        for x in (t, s2): l.addWidget(x)
+        l.addSpacing(30)
+        for x in (new, opn): l.addWidget(x, alignment=Qt.AlignCenter)
+        return w
+
+    def new_project(self):
+        for g in FIELDS.values():
+            for key, _l, _u, df in g:
+                self.edits[key].setText(str(df) if key in INT_KEYS else f"{df:g}")
+        self.load_combo.setCurrentIndex(0); self.p_name.setText("New PSC Bridge Project")
+        self.results = None; self._cache_key = None
+        self.switch_page(1)
+
+    def save_project(self):
+        import json
+        try: d = self.collect()
+        except InputError as e: QMessageBox.warning(self, "Invalid input", str(e)); return
+        d["_name"] = self.p_name.text(); d["_designer"] = self.p_des.text(); d["_desc"] = self.p_desc.toPlainText()
+        path, _ = QFileDialog.getSaveFileName(self, "Save project", "bridge_project.json", "Project (*.json)")
+        if path:
+            with open(path, "w") as f: json.dump(d, f, indent=1)
+
+    def open_project(self):
+        import json
+        path, _ = QFileDialog.getOpenFileName(self, "Open project", "", "Project (*.json)")
+        if not path: return
         try:
-            # Sync duped text fields
-            if sender == self.in_span: self.in_span_geom.setText(self.in_span.text())
-            elif sender == self.in_span_geom: self.in_span.setText(self.in_span_geom.text())
-            
-            if sender == self.in_girders: self.in_girders_geom.setText(self.in_girders.text())
-            elif sender == self.in_girders_geom: self.in_girders.setText(self.in_girders_geom.text())
+            d = json.load(open(path))
+            for k, e in self.edits.items():
+                if k in d: e.setText(str(d[k]))
+            if d.get("load_class") in LOADS: self.load_combo.setCurrentText(d["load_class"])
+            self.p_name.setText(d.get("_name", "")); self.p_des.setText(d.get("_designer", "")); self.p_desc.setPlainText(d.get("_desc", ""))
+        except Exception as ex:
+            QMessageBox.warning(self, "Cannot open", str(ex)); return
+        self.results = None; self._cache_key = None
+        self.switch_page(1)
 
-            # Push live update to 3D model
-            L = float(self.in_span.text() or 0)
-            num_g = int(self.in_girders.text() or 0)
-            spacing = float(self.in_spacing_geom.text() or 0)
-            depth = float(self.in_depth_geom.text() or 0)
-            tw = float(self.in_tw.text() or 0)
-            tf = float(self.in_tf.text() or 0)
-            bf = float(self.in_bf.text() or 0)
-            f_ck = self.in_fck.currentText()
-            
-            self.model_3d_page.update_properties(L, num_g, spacing, depth, tw, tf, bf, f_ck)
-        except ValueError:
-            pass # Ignore temporary empty strings while typing
-        finally:
-            self.sync_active = False
+    def _project_page(self):
+        c, l = self._card("Project details")
+        g = QGridLayout()
+        self.p_name = QLineEdit("PSC I-Girder Bridge"); self.p_des = QLineEdit("Ranvir Kumar (23CE36016)")
+        self.p_code = QComboBox(); self.p_code.addItems(["IRC:6-2017 / IRC:112-2011 (SP:71 as detailing reference)"])
+        for i, (a, w) in enumerate([("Project name", self.p_name), ("Designer", self.p_des), ("Design code", self.p_code)]):
+            g.addWidget(QLabel(a), i, 0); g.addWidget(w, i, 1)
+        l.addLayout(g)
+        note = QLabel("IRC:SP:71 covers pre-tensioned girders and is used here only for minimum dimensions "
+                      "(top flange ≥100 mm, bottom flange ≥150 mm, web ≥150 mm). IRC:18 is withdrawn; "
+                      "post-tensioned design follows IRC:112-2011. Clause references in the report are marked 'verify'.")
+        note.setWordWrap(True); note.setObjectName("card_subtitle"); l.addWidget(note)
+        self.p_desc = QTextEdit(); self.p_desc.setFixedHeight(80)
+        self.p_desc.setPlaceholderText("Short description of the bridge / project (printed in the report)")
+        self.p_desc.setPlainText("Design of a simply supported post-tensioned PSC I-girder bridge for CE60258.")
+        l.addWidget(QLabel("Project description (appears in the report)")); l.addWidget(self.p_desc)
+        c2 = self._grid_group("Span & deck")
+        return self._scroll([c, c2])
 
-    def build_pages(self):
-        # ------------------------------------------
-        # PAGE 0: PROJECT
-        # ------------------------------------------
-        p0_scroll = QScrollArea(); p0_scroll.setWidgetResizable(True)
-        p0 = QWidget(); l0 = QVBoxLayout(p0); l0.setContentsMargins(0, 0, 15, 0); l0.setSpacing(15)
+    def _form_page(self, groups, _):
+        return self._scroll([self._grid_group(g) for g in groups if g != "Span & deck"])
 
-        c1 = QFrame(); c1.setObjectName("card")
-        cl1 = QVBoxLayout(c1); cl1.setContentsMargins(20, 20, 20, 20)
-        
-        header1 = QLabel("📄 Project Details"); header1.setObjectName("card_title"); cl1.addWidget(header1); cl1.addSpacing(10)
-        
-        grid = QGridLayout(); grid.setSpacing(20)
-        name_in = QLineEdit("33 m PSC I-Girder Bridge")
-        id_in = QLineEdit(); id_in.setPlaceholderText("e.g. BR-001")
-        designer_in = QLineEdit("Structural Engineer")
-        client_in = QLineEdit(); client_in.setPlaceholderText("e.g. NHAI / State PWD")
-        code_in = QComboBox(); code_in.addItems(["IRC:6-2017, IRC:SP:71-2018", "AASHTO LRFD", "Eurocode 2"])
-        date_in = QDateEdit(); date_in.setDate(QDate.currentDate()); date_in.setCalendarPopup(True)
-        
-        grid.addWidget(self.create_field("Project Name", name_in, True), 0, 0)
-        grid.addWidget(self.create_field("Project ID (Optional)", id_in), 0, 1)
-        grid.addWidget(self.create_field("Designer", designer_in, True), 1, 0)
-        grid.addWidget(self.create_field("Client (Optional)", client_in), 1, 1)
-        grid.addWidget(self.create_field("Design Code", code_in, True), 2, 0)
-        grid.addWidget(self.create_field("Date", date_in), 2, 1)
-        
-        cl1.addLayout(grid); cl1.addSpacing(10)
-        desc_in = QTextEdit("Design and analysis of a 33 m PSC I-Girder Bridge.")
-        cl1.addWidget(self.create_field("Project Description (Optional)", desc_in))
-        l0.addWidget(c1)
+    def _loads_page(self):
+        c, l = self._card("IRC:6 live load")
+        self.load_combo = QComboBox(); self.load_combo.addItems(LOADS)
+        l.addWidget(QLabel("Design vehicle ('Governing' envelopes all classes)")); l.addWidget(self.load_combo)
+        c2 = self._grid_group("Superimposed loads")
+        return self._scroll([c, c2])
 
-        split_layout = QHBoxLayout(); split_layout.setSpacing(15)
-        
-        c2 = QFrame(); c2.setObjectName("card")
-        cl2 = QVBoxLayout(c2); cl2.setContentsMargins(20, 20, 20, 20); cl2.setSpacing(12)
-        
-        header2 = QLabel("🏢 Project Summary"); header2.setObjectName("card_title")
-        sub2 = QLabel("Key parameters for the bridge model."); sub2.setObjectName("card_subtitle")
-        cl2.addWidget(header2); cl2.addWidget(sub2); cl2.addSpacing(15)
-        
-        type_in = QComboBox(); type_in.addItems(["PSC I-Girder Bridge", "Box Girder", "T-Beam"])
-        self.in_span = QLineEdit("33.00")
-        self.in_girders = QLineEdit("4")
-        self.in_fck = QComboBox(); self.in_fck.addItems(["M40", "M45", "M50", "M55", "M60"]); self.in_fck.setCurrentText("M50")
-        self.in_load = QComboBox(); self.in_load.addItems(["Class 70R Wheeled", "Class 70R Tracked", "Class A", "Class B"])
-        
-        self.in_span.textChanged.connect(self.trigger_live_sync)
-        self.in_girders.textChanged.connect(self.trigger_live_sync)
-        self.in_fck.currentTextChanged.connect(self.trigger_live_sync)
-        
-        cl2.addWidget(self.create_inline_field("Bridge Type", type_in))
-        cl2.addWidget(self.create_inline_field("Span Length", self.in_span, "m"))
-        cl2.addWidget(self.create_inline_field("Number of Girders", self.in_girders))
-        cl2.addWidget(self.create_inline_field("Concrete Grade", self.in_fck))
-        cl2.addWidget(self.create_inline_field("Loading Class", self.in_load))
-        
-        split_layout.addWidget(c2) 
-        split_layout.addStretch() 
-        l0.addLayout(split_layout)
+    def meta(self):
+        return dict(name=self.p_name.text(), designer=self.p_des.text(), code=self.p_code.currentText(), description=self.p_desc.toPlainText().strip())
 
-        footer0 = QHBoxLayout()
-        back_btn0 = QPushButton("← Back"); back_btn0.setObjectName("nav_back"); back_btn0.setEnabled(False)
-        next_btn0 = QPushButton("Next: Geometry →"); next_btn0.setObjectName("nav_next"); next_btn0.clicked.connect(lambda: self.switch_page(1))
-        footer0.addWidget(back_btn0); footer0.addStretch(); footer0.addWidget(next_btn0)
-        l0.addSpacing(10); l0.addLayout(footer0)
+    def collect(self):
+        d = {}
+        for g in FIELDS.values():
+            for key, label, _u, _df in g:
+                t = self.edits[key].text().strip()
+                try: d[key] = int(float(t)) if key in INT_KEYS else float(t)
+                except ValueError: raise InputError(f"'{label}' must be a number (got '{t}').")
+        d["load_class"] = self.load_combo.currentText()
+        return d
 
-        p0_scroll.setWidget(p0)
-        self.stack.addWidget(p0_scroll)
-
-        # ------------------------------------------
-        # PAGE 1: GEOMETRY & MATERIALS
-        # ------------------------------------------
-        p1_scroll = QScrollArea(); p1_scroll.setWidgetResizable(True)
-        p1 = QWidget(); l1 = QVBoxLayout(p1); l1.setContentsMargins(0, 0, 15, 0); l1.setSpacing(15)
-
-        cg1 = QFrame(); cg1.setObjectName("card")
-        cl_g1 = QVBoxLayout(cg1); cl_g1.setContentsMargins(20, 20, 20, 20)
-        hg1 = QLabel("📐 Global Geometry Specifications"); hg1.setObjectName("card_title"); cl_g1.addWidget(hg1); cl_g1.addSpacing(10)
-        
-        grid_g = QGridLayout(); grid_g.setSpacing(20)
-        self.in_span_geom = QLineEdit("33.00")
-        self.in_girders_geom = QLineEdit("4")
-        self.in_spacing_geom = QLineEdit("2.75")
-        self.in_depth_geom = QLineEdit("2.00")
-        
-        self.in_tw = QLineEdit("0.30")
-        self.in_tf = QLineEdit("0.20")
-        self.in_bf = QLineEdit("0.80")
-
-        self.in_span_geom.textChanged.connect(self.trigger_live_sync)
-        self.in_girders_geom.textChanged.connect(self.trigger_live_sync)
-        self.in_spacing_geom.textChanged.connect(self.trigger_live_sync)
-        self.in_depth_geom.textChanged.connect(self.trigger_live_sync)
-        self.in_tw.textChanged.connect(self.trigger_live_sync)
-        self.in_tf.textChanged.connect(self.trigger_live_sync)
-        self.in_bf.textChanged.connect(self.trigger_live_sync)
-        
-        grid_g.addWidget(self.create_field("Effective Span Length (m)", self.in_span_geom), 0, 0)
-        grid_g.addWidget(self.create_field("Number of Longitudinal Girders", self.in_girders_geom), 0, 1)
-        grid_g.addWidget(self.create_field("Girder Spacing (m) [2.5m - 3m]", self.in_spacing_geom), 1, 0)
-        grid_g.addWidget(self.create_field("Overall Girder Depth (m)", self.in_depth_geom), 1, 1)
-        cl_g1.addLayout(grid_g); l1.addWidget(cg1)
-
-        cg_sec = QFrame(); cg_sec.setObjectName("card")
-        cl_gsec = QVBoxLayout(cg_sec); cl_gsec.setContentsMargins(20, 20, 20, 20)
-        h_gsec = QLabel("📏 Girder Cross-Section Details"); h_gsec.setObjectName("card_title"); cl_gsec.addWidget(h_gsec)
-        
-        # IRC SP 71 minimum constraint text
-        irc_warning = QLabel("<b>IRC:SP:71-2018 Minimums:</b> Top Flange = 100 mm, Bottom Flange = 150 mm, Web = 150 mm")
-        irc_warning.setStyleSheet("color: #C53030; font-size: 11px; margin-bottom: 10px;")
-        cl_gsec.addWidget(irc_warning)
-
-        grid_sec = QGridLayout(); grid_sec.setSpacing(20)
-        grid_sec.addWidget(self.create_field("Top Flange Thickness (m)", self.in_tf), 0, 0)
-        grid_sec.addWidget(self.create_field("Bottom Flange Thickness (m)", self.in_bf), 0, 1)
-        grid_sec.addWidget(self.create_field("Web Thickness (m)", self.in_tw), 1, 0)
-        cl_gsec.addLayout(grid_sec); l1.addWidget(cg_sec)
-
-        cg2 = QFrame(); cg2.setObjectName("card")
-        cl_g2 = QVBoxLayout(cg2); cl_g2.setContentsMargins(20, 20, 20, 20)
-        hg2 = QLabel("🧪 Detailed Material Grades"); hg2.setObjectName("card_title"); cl_g2.addWidget(hg2); cl_g2.addSpacing(10)
-        
-        grid_m = QGridLayout(); grid_m.setSpacing(20)
-        self.in_steel = QComboBox(); self.in_steel.addItems(["Fe500 (TMT)", "Fe415", "Fe550"])
-        self.in_tendon = QComboBox(); self.in_tendon.addItems(["Low Relaxation 1860 MPa Strands", "Stress Relieved Strands"])
-        
-        grid_m.addWidget(self.create_field("Reinforcement Steel Grade", self.in_steel), 0, 0)
-        grid_m.addWidget(self.create_field("Prestressing Tendon Type", self.in_tendon), 0, 1)
-        cl_g2.addLayout(grid_m); l1.addWidget(cg2)
-
-        footer1 = QHBoxLayout()
-        back_btn1 = QPushButton("← Back to Project"); back_btn1.setObjectName("nav_back"); back_btn1.clicked.connect(lambda: self.switch_page(0))
-        next_btn1 = QPushButton("Next: Loads →"); next_btn1.setObjectName("nav_next"); next_btn1.clicked.connect(lambda: self.switch_page(2))
-        footer1.addWidget(back_btn1); footer1.addStretch(); footer1.addWidget(next_btn1)
-        l1.addSpacing(10); l1.addLayout(footer1)
-
-        p1_scroll.setWidget(p1)
-        self.stack.addWidget(p1_scroll)
-
-        # ------------------------------------------
-        # PAGE 2: LOADS
-        # ------------------------------------------
-        p2_scroll = QScrollArea(); p2_scroll.setWidgetResizable(True)
-        p2 = QWidget(); l2 = QVBoxLayout(p2); l2.setContentsMargins(0, 0, 15, 0); l2.setSpacing(15)
-
-        cload1 = QFrame(); cload1.setObjectName("card")
-        cl_l1 = QVBoxLayout(cload1); cl_l1.setContentsMargins(20, 20, 20, 20)
-        h_l1 = QLabel("🚚 IRC Live Load Specifications (IRC:6-2017)"); h_l1.setObjectName("card_title"); cl_l1.addWidget(h_l1); cl_l1.addSpacing(10)
-        
-        grid_l = QGridLayout(); grid_l.setSpacing(20)
-        self.in_load_class_loads = QComboBox()
-        self.in_load_class_loads.addItems(["Class 70R Wheeled", "Class 70R Tracked", "Class A", "Class B"])
-        self.in_load_class_loads.setCurrentText("Class 70R Wheeled")
-        self.in_lanes = QLineEdit("3")
-        
-        grid_l.addWidget(self.create_field("Design Vehicle / Loading Class", self.in_load_class_loads), 0, 0)
-        grid_l.addWidget(self.create_field("Number of Design Lanes", self.in_lanes), 0, 1)
-        cl_l1.addLayout(grid_l); l2.addWidget(cload1)
-
-        cload2 = QFrame(); cload2.setObjectName("card")
-        cl_l2 = QVBoxLayout(cload2); cl_l2.setContentsMargins(20, 20, 20, 20)
-        h_l2 = QLabel("📋 Active Structural Load Cases"); h_l2.setObjectName("card_title")
-        sub_l2 = QLabel("Summary of dead, live, and environmental actions applied to girders."); sub_l2.setObjectName("card_subtitle")
-        cl_l2.addWidget(h_l2); cl_l2.addWidget(sub_l2); cl_l2.addSpacing(15)
-        
-        load_table = QTableWidget(4, 5)
-        load_table.setHorizontalHeaderLabels(["Case ID", "Description", "Category", "Magnitude / Type", "Status"])
-        load_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        load_table.setFixedHeight(180)
-        
-        loads_data = [
-            ("DL-01", "Girder Self Weight + Deck Slab", "Permanent (Dead)", "Calculated (Auto)", "Active ✓"),
-            ("SIDL-02", "Wearing Coat & Crash Barriers", "Permanent (SIDL)", "22.0 kN/m³", "Active ✓"),
-            ("LL-03", "IRC Moving Vehicular Train", "Transient (Live)", "Per IRC:6 Specification", "Active ✓"),
-            ("IMP-04", "Dynamic Impact Allowance", "Transient (Impact)", "Calculated via Span L", "Active ✓")
-        ]
-        
-        for row_idx, row_data in enumerate(loads_data):
-            for col_idx, text in enumerate(row_data):
-                load_table.setItem(row_idx, col_idx, QTableWidgetItem(text))
-                
-        cl_l2.addWidget(load_table); l2.addWidget(cload2)
-
-        footer2 = QHBoxLayout()
-        back_btn2 = QPushButton("← Back to Geometry"); back_btn2.setObjectName("nav_back"); back_btn2.clicked.connect(lambda: self.switch_page(1))
-        next_btn2 = QPushButton("Next: 3D Model →"); next_btn2.setObjectName("nav_next"); next_btn2.clicked.connect(lambda: self.switch_page(3))
-        footer2.addWidget(back_btn2); footer2.addStretch(); footer2.addWidget(next_btn2)
-        l2.addSpacing(10); l2.addLayout(footer2)
-
-        p2_scroll.setWidget(p2)
-        self.stack.addWidget(p2_scroll)
-
-        # ------------------------------------------
-        # PAGE 3: Import 3D / 2D model page
-        # ------------------------------------------
-        self.model_3d_page = Model3DPage(self)
-        self.stack.addWidget(self.model_3d_page)
-
-        # ------------------------------------------
-        # PAGES 4, 5, 6
-        # ------------------------------------------
-        for i in range(4, 7):
-            pg = QWidget(); ly = QVBoxLayout(pg)
-            lbl = QLabel(f"Page {i+1} Content under construction..."); lbl.setAlignment(Qt.AlignCenter); lbl.setStyleSheet("font-size: 18px; color: #718096;")
-            ly.addWidget(lbl)
-            self.stack.addWidget(pg)
-
-    def switch_page(self, index):
-        if index == 2:
-            self.in_load_class_loads.setCurrentText(self.in_load.currentText())
-
-        for i, btn in enumerate(self.nav_btns):
-            btn.setChecked(i == index)
-        self.stack.setCurrentIndex(index)
-        
-        titles = ["PROJECT", "GEOMETRY", "LOADS", "3D MODEL", "ANALYSIS", "RESULTS", "REPORT"]
-        self.title_lbl.setText(titles[index])
+    def get_results(self, show_errors=True):
+        try:
+            d = self.collect()
+            key = repr(sorted(d.items()))
+            if key != self._cache_key or self.results is None:
+                self.results = self.engine.run(d); self._cache_key = key
+            self.status.setText("")
+            return self.results
+        except InputError as e:
+            if show_errors: QMessageBox.warning(self, "Invalid input", str(e))
+            self.results = None; self._cache_key = None
+            self.status.setText("input error")
+            return None
 
     def run_analysis(self):
-        try:
-            L = float(self.in_span.text()); num_girders = int(self.in_girders.text())
-            f_ck = float(self.in_fck.currentText()[1:]); load_class = self.in_load.currentText()
-            res = self.engine.analyze(L, num_girders, f_ck, load_class)
-            print(f"ANALYSIS SUCCESSFUL: Max ULS Moment = {res['m_uls']} kNm")
-            self.switch_page(5)
-        except ValueError:
-            print("Input error.")
+        if self.get_results() is not None:
+            for p in (self.model_page, self.analysis_page, self.results_page, self.report_page):
+                p.refresh()
+            self.switch_page(6)
+
+    def switch_page(self, i):
+        i = max(0, min(7, i))
+        for k, b in enumerate(self.nav): b.setChecked(k == i)
+        titles = ["HOME", "PROJECT", "GEOMETRY & MATERIALS", "LOADS", "3D MODEL", "ANALYSIS", "RESULTS", "REPORT"]
+        subs = ["Start a new bridge project or open a saved one.", "Project information and deck layout.", "Girder section, materials and prestressing data.",
+                "IRC:6 live load and superimposed loads.", "Views generated from the current inputs.",
+                "Force envelopes, stresses and deflections.", "Design checks (all from the analysis engine).",
+                "PDF / CSV / TXT export of the engine results."]
+        self.title.setText(titles[i]); self.sub.setText(subs[i]); self.stack.setCurrentIndex(i)
+        self.back_btn.setVisible(i > 0); self.save_btn.setVisible(i > 0); self.next_btn.setVisible(0 < i < len(titles) - 1)
+        if i > 0: self.back_btn.setText(f"← Back: {titles[i-1].title()}")
+        if i < len(titles) - 1: self.next_btn.setText(f"Next: {titles[i+1].title()} →")
+        if i >= 4 and self.get_results() is not None:
+            self.stack.currentWidget().refresh()
+
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    window = PSCBridgeApp()
-    window.show()
+    w = PSCBridgeApp(); w.show()
     sys.exit(app.exec())
