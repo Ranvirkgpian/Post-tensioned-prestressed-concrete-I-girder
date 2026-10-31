@@ -21,20 +21,21 @@
 1. [Overview](#1-overview)
 2. [Features](#2-features)
 3. [Screenshots](#3-screenshots)
-4. [Design results shown in the diagrams](#4-analysis-diagrams)
-5. [Repository structure](#5-repository-structure)
-6. [Requirements](#6-requirements)
-7. [Installation and running](#7-installation-and-running)
+4. [Views](#4-views)
+5. [Analysis diagrams](#5-analysis-diagrams)
+6. [Repository structure](#6-repository-structure)
+7. [Requirements](#7-requirements)
+8. [Installation and running](#8-installation-and-running)
    - [Option A: PowerShell (Windows)](#option-a-powershell-windows)
    - [Option B: Visual Studio Code](#option-b-visual-studio-code)
    - [Option C: Visual Studio 2022](#option-c-visual-studio-2022)
    - [macOS / Linux](#macos--linux)
-8. [Using the application](#8-using-the-application)
-9. [Design methodology](#9-design-methodology)
-10. [Testing](#10-testing)
-11. [Troubleshooting](#11-troubleshooting)
-12. [Assumptions and limitations](#12-assumptions-and-limitations)
-13. [Author and acknowledgements](#13-author-and-acknowledgements)
+9. [Using the application](#9-using-the-application)
+10. [Design methodology](#10-design-methodology)
+11. [Testing](#11-testing)
+12. [Troubleshooting](#12-troubleshooting)
+13. [Assumptions and limitations](#13-assumptions-and-limitations)
+14. [Author and acknowledgements](#14-author-and-acknowledgements)
 
 ---
 
@@ -84,7 +85,23 @@ The central idea is **one engine, every page**. All numbers, drawings and diagra
 |:--:|:--:|
 | ![Results](Screenshots/Result%20Page.png) | ![Report](Screenshots/Report%20Page.png) |
 
-## 4. Analysis diagrams
+## 4. Views
+
+Dimensioned 3D and 2D views generated from the same engine (Views/ folder).
+
+| 3D view | Elevation |
+|:--:|:--:|
+| ![3D](Views/3D%20View.png) | ![Elevation](Views/Elevation%20View.png) |
+
+| Plan | Bridge cross-section |
+|:--:|:--:|
+| ![Plan](Views/Plan%20View.png) | ![Cross-section](Views/Bridge%20Cross%20Section%20View.png) |
+
+| Girder section with tendon ducts |
+|:--:|
+| ![Girder](Views/Girder%20View.png) |
+
+## 5. Analysis diagrams
 
 | Bending moment | Shear force |
 |:--:|:--:|
@@ -100,7 +117,7 @@ The central idea is **one engine, every page**. All numbers, drawings and diagra
 
 Key default-case results: Mu = 16,032 kNm against 19,939 kNm capacity; design shear 1,348 kN against 1,561 kN; P0 = 9,960 kN, Pe at midspan 7,981 kN (19.9 % total loss); long-term deflection 28.1 mm against a 132 mm limit. 13 of 14 checks pass. The transfer maximum compression check is slightly over (22.78 against 22.50 MPa) and is shown honestly.
 
-## 5. Repository structure
+## 6. Repository structure
 
 ```text
 Post-tensioned-prestressed-concrete-I-girder/
@@ -117,10 +134,10 @@ Post-tensioned-prestressed-concrete-I-girder/
 ├── requirements.txt        # Python dependencies
 ├── Diagram/                # Analysis diagram images
 ├── Screenshots/            # Application page screenshots
-└── Views/                  # 3D and 2D view images
+└── Views/                  # 3D, elevation, plan, cross-section, girder views
 ```
 
-## 6. Requirements
+## 7. Requirements
 
 | Requirement | Version |
 |---|---|
@@ -132,7 +149,7 @@ Post-tensioned-prestressed-concrete-I-girder/
 
 A screen of at least 1280 x 720 is recommended. The app needs no internet connection once installed.
 
-## 7. Installation and running
+## 8. Installation and running
 
 First get the code. Either clone with Git:
 
@@ -217,7 +234,7 @@ python main.py
 
 On some Linux systems, Qt needs extra libraries: `sudo apt install libxcb-cursor0 libgl1`.
 
-## 8. Using the application
+## 9. Using the application
 
 1. **Home**: click **Start a New Project**, or **Open a Saved Project** to load a `.json` file.
 2. **Project**: enter the project name, author and design-code notes.
@@ -229,7 +246,7 @@ On some Linux systems, Qt needs extra libraries: `sudo apt install libxcb-cursor
 8. **Report**: preview the report and export it as **PDF**, **CSV** or **TXT**.
 9. Use **Save Project** at the bottom to store all inputs in a JSON file, and **Back** / **Next** to move between pages.
 
-## 9. Design methodology
+## 10. Design methodology
 
 | Stage | Method |
 |---|---|
@@ -241,7 +258,7 @@ On some Linux systems, Qt needs extra libraries: `sudo apt install libxcb-cursor
 | Deflection | Double integration of M/EI, zero at both supports |
 | Minimum dimensions | SP:71 used as a reference only |
 
-## 10. Testing
+## 11. Testing
 
 Run the engine tests from the project folder:
 
@@ -251,7 +268,7 @@ python test_engine.py
 
 The tests cover unit consistency, load envelopes, losses, capacity and deflection.
 
-## 11. Troubleshooting
+## 12. Troubleshooting
 
 | Problem | Fix |
 |---|---|
@@ -264,7 +281,7 @@ The tests cover unit consistency, load envelopes, losses, capacity and deflectio
 | 3D view feels slow | Hide elements you do not need with the checkboxes. |
 | PDF text looks wrong | Make sure matplotlib is installed; the report uses its bundled DejaVu fonts. |
 
-## 12. Assumptions and limitations
+## 13. Assumptions and limitations
 
 - Clause numbers, lane reductions, impact factors and partial factors are assumptions and should be **verified against the codes**.
 - SP:71 is for pre-tensioned girders and is used only as a dimension reference.
@@ -272,7 +289,7 @@ The tests cover unit consistency, load envelopes, losses, capacity and deflectio
 - The default case shows one failing check (transfer maximum compression, 101.3 % utilisation). It needs a design change such as staged stressing or a larger bottom flange.
 - This is an academic tool and not a substitute for a certified design review.
 
-## 13. Author and acknowledgements
+## 14. Author and acknowledgements
 
 **Ranvir Kumar**, B.Tech Civil Engineering, IIT Kharagpur. GitHub: [@Ranvirkgpian](https://github.com/Ranvirkgpian).
 
