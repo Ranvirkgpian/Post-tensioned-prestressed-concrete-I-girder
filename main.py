@@ -6,6 +6,7 @@ from PySide6.QtWidgets import (QFileDialog, QApplication, QMainWindow, QWidget, 
                                QTextEdit, QSizePolicy, QMessageBox)
 from PySide6.QtCore import Qt
 from bridge_engine import BridgeEngine, BridgeInputs, InputError, VEHICLES
+from ui_monitor import MonitorPage
 from ui_analysis import AnalysisPage
 from ui_results import ResultsPage
 from ui_report import ReportPage
@@ -107,6 +108,7 @@ class PSCBridgeApp(QMainWindow):
         self.stack.addWidget(self._loads_page())
         self.model_page = Model3DPage(self); self.stack.addWidget(self.model_page)
         self.analysis_page = AnalysisPage(self); self.stack.addWidget(self.analysis_page)
+        self.monitor_page = MonitorPage(self); self.stack.addWidget(self.monitor_page)
         self.results_page = ResultsPage(self); self.stack.addWidget(self.results_page)
         self.report_page = ReportPage(self); self.stack.addWidget(self.report_page)
         self.switch_page(0)
@@ -239,17 +241,17 @@ class PSCBridgeApp(QMainWindow):
 
     def run_analysis(self):
         if self.get_results() is not None:
-            for p in (self.model_page, self.analysis_page, self.results_page, self.report_page):
+            for p in (self.model_page, self.analysis_page, self.monitor_page, self.results_page, self.report_page):
                 p.refresh()
-            self.switch_page(6)
+            self.switch_page(7)
 
     def switch_page(self, i):
-        i = max(0, min(7, i))
+        i = max(0, min(8, i))
         for k, b in enumerate(self.nav): b.setChecked(k == i)
-        titles = ["HOME", "PROJECT", "GEOMETRY & MATERIALS", "LOADS", "3D MODEL", "ANALYSIS", "RESULTS", "REPORT"]
+        titles = ["HOME", "PROJECT", "GEOMETRY & MATERIALS", "LOADS", "3D MODEL", "ANALYSIS", "MONITORING & AI", "RESULTS", "REPORT"]
         subs = ["Start a new bridge project or open a saved one.", "Project information and deck layout.", "Girder section, materials and prestressing data.",
                 "IRC:6 live load and superimposed loads.", "Views generated from the current inputs.",
-                "Force envelopes, stresses and deflections.", "Design checks (all from the analysis engine).",
+                "Force envelopes, stresses and deflections.", "Inspection, NDT, vibration, synthetic data, AI/ML and maintenance.", "Design checks (all from the analysis engine).",
                 "PDF / CSV / TXT export of the engine results."]
         self.title.setText(titles[i]); self.sub.setText(subs[i]); self.stack.setCurrentIndex(i)
         self.back_btn.setVisible(i > 0); self.save_btn.setVisible(i > 0); self.next_btn.setVisible(0 < i < len(titles) - 1)

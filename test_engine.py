@@ -33,3 +33,12 @@ def test_fuzz_no_nan():
         try: r = run(L=L, n_girders=random.randint(3, 7), depth=round(L / random.uniform(14, 20), 2), n_lanes=random.randint(2, 4))
         except InputError: continue
         assert np.isfinite(r["forces"]["M_uls"]).all() and np.isfinite(r["prestress"]["Pe"]).all()
+
+
+def test_monitor_pipeline():
+    import bridge_monitor as bm
+    m = bm.run_monitoring(BridgeEngine().run({}), n_per=40)
+    f = [m["rep"][s]["f"][0] for s in bm.STATES]
+    assert all(f[i] > f[i + 1] for i in range(3)), "frequency must fall with damage"
+    assert m["acc"] > 0.9 and m["decision"]["urgency"] in ("Low", "Medium", "High", "Critical")
+    print("monitor ok")

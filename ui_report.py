@@ -18,6 +18,14 @@ def build_text(r, name=""):
         L += ["", f"{n_}. {c['name']}  [{c['status']}]"]
         for kind, txt in c.get("calc", []):
             L.append(("   " + txt) if kind != "h" else ("  " + txt))
+    try:
+        from ui_monitor import get_monitor
+        mm = get_monitor(r); b_ = mm["b"]; d_ = mm["decision"]
+        L += ["", "LIFECYCLE ASSESSMENT (SYNTHETIC STUDY)", "-" * 70,
+              f"Baseline: Pe = {b_['Pe']:,.0f} kN, delta = {b_['delta']:.1f} mm, f1/f2/f3 = {b_['f'][0]:.2f}/{b_['f'][1]:.2f}/{b_['f'][2]:.2f} Hz",
+              f"Dataset: {mm['n']} synthetic samples ({mm['n_train']} train). Classifier accuracy {mm['acc']*100:.0f} %, anomaly detection {mm['tpr']*100:.0f} % at {mm['fpr']*100:.0f} % false alarms, severity R2 {mm['r2']:.2f}",
+              f"Demonstration assessment: {mm['current']['pred']} -> {d_['action']} ({d_['urgency']} urgency)", f"Detail: {d_['detail']}"]
+    except Exception: pass
     L += ["", "GLOBAL NOTES", "-" * 70]
     for st in r["steps"]:
         L += [st["title"], f"  Given        : {st['given']}", f"  Formula      : {st['formula']}",
@@ -203,14 +211,47 @@ def write_pdf(path, r, name="", meta=None):
             else: body.append([P("Result", "lab"), P(txt, "res")]); sty += [("BACKGROUND", (0, ri), (1, ri), colors.HexColor("#EBF8FF"))]
         ct = Table(body or [["", ""]], colWidths=[W * .1, W * .9]); ct.setStyle(TableStyle(sty))
         E.append(KeepTogether([head, sm, ct, Spacer(1, 12)])) if len(body) < 22 else E.extend([head, sm, ct, Spacer(1, 12)])
-    E += [PageBreak(), P("6. Calculation Notes (global)", "h1")]
+    # ---- lifecycle / AI health monitoring (synthetic study)
+    from ui_monitor import get_monitor, draw_monitor, PLOTS as MP
+    import bridge_monitor as bm
+    mon = get_monitor(r); b_ = mon["b"]; d_ = mon["decision"]; tl = mon["timeline"]
+    E += [PageBreak(), P("6. Lifecycle and AI Health Monitoring (synthetic study)", "h1"),
+          P("The designed bridge is treated as the healthy baseline. Four deterioration states are assumed (prestress loss, stiffness loss, corrosion, cracking) and synthetic "
+            "inspection, NDT, displacement, strain and acceleration data are generated from them. Features are extracted by FFT and direct measures, and three NumPy models are trained: "
+            "a state classifier, an anomaly detector and a stiffness-loss regression. All deterioration values are assumed and all measurements are synthetic; the results demonstrate the workflow and are not field-validated.")]
+    E.append(P("6.1 Healthy baseline", "h2"))
+    E.append(tbl([[P("Quantity", "head"), P("Baseline", "head")], [P("Effective prestress Pe (midspan)", "cell"), P(f"{b_['Pe']:,.0f} kN", "cell")],
+                  [P("Long-term midspan deflection", "cell"), P(f"{b_['delta']:.1f} mm", "cell")], [P("Natural frequencies f1 / f2 / f3", "cell"), P(f"{b_['f'][0]:.2f} / {b_['f'][1]:.2f} / {b_['f'][2]:.2f} Hz", "cell")],
+                  [P("Flexural stiffness EI (composite)", "cell"), P(f"{b_['EI']/1e9:,.1f} GN.m2", "cell")], [P("Dead mass per girder", "cell"), P(f"{b_['mass']:,.0f} kg/m", "cell")]], [W * .55, W * .45]))
+    for i in (1, 2, 3): E.append(KeepTogether([P(MP[i], "h2"), fig_img(lambda fg, i=i: draw_monitor(fg, MP[i], r), h_=W * 5.2 / 9, size=(9, 5.2))]))
+    E.append(KeepTogether([P("Vibration: acceleration and FFT (moderate damage)", "h2"), fig_img(lambda fg: draw_monitor(fg, MP[4], r, "Moderate"), h_=W * 5.2 / 9, size=(9, 5.2))]))
+    for i in (5, 6): E.append(KeepTogether([P(MP[i], "h2"), fig_img(lambda fg, i=i: draw_monitor(fg, MP[i], r), h_=W * 5.2 / 9, size=(9, 5.2))]))
+    E.append(P("6.2 Synthetic data by condition state", "h2"))
+    rows = [[P(h, "head") for h in ("State", "f1 (Hz)", "f2 (Hz)", "Defl. (mm)", "Strain (ue)", "Pe (kN)", "UPV (km/s)", "Rebound")]]
+    for st_ in bm.STATES:
+        v = mon["rep"][st_]; rows.append([P(st_, "cellb"), P(f"{v['f'][0]:.2f}", "cell"), P(f"{v['f'][1]:.2f}", "cell"), P(f"{v['delta']:.1f}", "cell"), P(f"{v['eps']:.0f}", "cell"), P(f"{v['Pe']:,.0f}", "cell"), P(f"{v['upv']:.2f}", "cell"), P(f"{v['rebound']:.0f}", "cell")])
+    E.append(tbl(rows, [W * .16] + [W * .12] * 7))
+    E.append(P("6.3 AI/ML assessment", "h1"))
+    E.append(P(f"Dataset: {mon['n']} synthetic samples ({mon['n_train']} training, {mon['n']-mon['n_train']} test). Classifier test accuracy {mon['acc']*100:.0f} %; anomaly detector finds "
+               f"{mon['tpr']*100:.0f} % of damaged samples with {mon['fpr']*100:.0f} % false alarms; stiffness-loss regression R2 = {mon['r2']:.2f}. Accuracy is high because the synthetic classes are well separated; real data would be noisier."))
+    rows = [[P(h, "head") for h in ("State", "Test samples", "Precision", "Recall", "F1")]] + [[P(c_, "cellb"), P(str(n_), "cell"), P(f"{p_*100:.0f} %", "cell"), P(f"{r_*100:.0f} %", "cell"), P(f"{f_:.2f}", "cell")] for c_, n_, p_, r_, f_ in mon["perclass"]]
+    E.append(tbl(rows, [W * .25, W * .19, W * .19, W * .19, W * .18]))
+    for i, ttl in ((7, "Classifier, feature space and feature importance"), (8, "Feature distributions and anomaly scores"), (9, "Health monitoring timeline (30 years, monthly)")):
+        E.append(KeepTogether([P(ttl, "h2"), fig_img(lambda fg, i=i: draw_monitor(fg, MP[i], r), h_=W * 5.2 / 9, size=(9, 5.2))]))
+    E.append(P("Monitoring milestones", "h2"))
+    E.append(tbl([[P("Milestone", "head"), P("Time", "head")]] + [[P(a_, "cell"), P("not reached" if y_ is None else f"{y_:.1f} years", "cell")] for a_, y_ in tl["milestones"]], [W * .6, W * .4]))
+    E.append(P("6.4 Maintenance decision", "h2"))
+    E.append(P(f"Demonstration assessment: {mon['current']['pred']} (probability {mon['current']['prob'].max():.2f}); anomaly alarm {'raised' if d_['anomaly'] else 'not raised'}; first frequency down {d_['f1_shift']:.1f} %; "
+               f"{d_['Pe_remaining']:.0f} % of prestress remaining. Action: {d_['action']} (urgency {d_['urgency']}). {d_['detail']}"))
+    E.append(KeepTogether([fig_img(lambda fg: draw_monitor(fg, MP[10], r), h_=W * 0.55, size=(9, 5.0))]))
+    E += [PageBreak(), P("7. Calculation Notes (global)", "h1")]
     for stp in r["steps"]:
         rows = [[P(stp["title"], "head"), ""], [P("Given", "lab"), P(stp["given"], "cell")], [P("Formula", "lab"), P(stp["formula"], "form")],
                 [P("Values", "lab"), P(stp["substitution"], "sub_")], [P("Result", "lab"), P(stp["result"], "res")], [P("Check", "lab"), P(stp["verification"], "note")]]
         t = Table(rows, colWidths=[W * .1, W * .9]); t.setStyle(TableStyle([("SPAN", (0, 0), (1, 0)), ("BACKGROUND", (0, 0), (1, 0), NAVY), ("BOX", (0, 0), (-1, -1), .4, LINE),
                                                                                 ("VALIGN", (0, 0), (-1, -1), "TOP"), ("TOPPADDING", (0, 0), (-1, -1), 3), ("BOTTOMPADDING", (0, 0), (-1, -1), 3)]))
         E += [KeepTogether([t]), Spacer(1, 8)]
-    E.append(P("7. Assumptions to Verify", "h1"))
+    E.append(P("8. Assumptions to Verify", "h1"))
     for a_ in r["assumptions"]: E.append(P("•  " + a_, "note"))
     for w_ in r["warnings"]: E.append(P("Warning: " + w_, "note"))
     doc.build(E)

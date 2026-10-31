@@ -22,20 +22,21 @@
 2. [Features](#2-features)
 3. [Screenshots](#3-screenshots)
 4. [Views](#4-views)
-5. [Analysis diagrams](#5-analysis-diagrams)
-6. [Repository structure](#6-repository-structure)
-7. [Requirements](#7-requirements)
-8. [Installation and running](#8-installation-and-running)
+5. [Monitoring and AI results](#5-monitoring-and-ai-results)
+6. [Analysis diagrams](#6-analysis-diagrams)
+7. [Repository structure](#7-repository-structure)
+8. [Requirements](#8-requirements)
+9. [Installation and running](#9-installation-and-running)
    - [Option A: PowerShell (Windows)](#option-a-powershell-windows)
    - [Option B: Visual Studio Code](#option-b-visual-studio-code)
    - [Option C: Visual Studio 2022](#option-c-visual-studio-2022)
    - [macOS / Linux](#macos--linux)
-9. [Using the application](#9-using-the-application)
-10. [Design methodology](#10-design-methodology)
-11. [Testing](#11-testing)
-12. [Troubleshooting](#12-troubleshooting)
-13. [Assumptions and limitations](#13-assumptions-and-limitations)
-14. [Author and acknowledgements](#14-author-and-acknowledgements)
+10. [Using the application](#10-using-the-application)
+11. [Design methodology](#11-design-methodology)
+12. [Testing](#12-testing)
+13. [Troubleshooting](#13-troubleshooting)
+14. [Assumptions and limitations](#14-assumptions-and-limitations)
+15. [Author and acknowledgements](#15-author-and-acknowledgements)
 
 ---
 
@@ -57,7 +58,8 @@ The central idea is **one engine, every page**. All numbers, drawings and diagra
 ## 2. Features
 
 - **Home page** to start a new project or open a saved one (JSON project files).
-- **Guided workflow** with Next and Back buttons: Project, Geometry and Materials, Loads, 3D Model, Analysis, Results, Report.
+- **Guided workflow** with Next and Back buttons: Project, Geometry and Materials, Loads, 3D Model, Analysis, Monitoring & AI, Results, Report.
+- **Lifecycle module (Monitoring & AI page)**: healthy baseline, visual-inspection scheme, NDT plan and synthetic results, sensor layout, synthetic acceleration with FFT, four deterioration states, feature extraction, AI/ML assessment (classifier, anomaly detector, severity regression) and a maintenance decision.
 - **IRC:6-2017 loading**: Class A, Class B, 70R wheeled, 70R tracked, and a Governing envelope; impact, lane reduction and Courbon distribution factor.
 - **Post-tensioning model**: friction, anchorage slip, elastic shortening, creep, shrinkage and relaxation losses; parabolic tendon profile; two ducts in the bottom flange and the rest in the web below the centroid.
 - **Limit-state checks** to IRC:112-2011: flexure (strain compatibility), shear (variable strut), staged stresses, and long-term deflection.
@@ -101,7 +103,53 @@ Dimensioned 3D and 2D views generated from the same engine (Views/ folder).
 |:--:|
 | ![Girder](Views/Girder%20View.png) |
 
-## 5. Analysis diagrams
+## 5. Monitoring and AI results
+
+The **Monitoring & AI** page carries the design through inspection, NDT, vibration monitoring, synthetic data, feature extraction, AI/ML assessment and a maintenance decision. All deterioration values and measurements are **synthetic and assumed** (480 samples, 336 train / 144 test); the results demonstrate the workflow and are not field-validated. Images are in the `Monitoring and AI/` folder.
+
+| Healthy baseline | Visual inspection scheme |
+|:--:|:--:|
+| ![Baseline](Monitoring%20and%20AI/Healthy%20baseline.png) | ![Inspection](Monitoring%20and%20AI/Visual%20Inspection%20scheme.png) |
+
+| NDT results | Sensor layout |
+|:--:|:--:|
+| ![NDT](Monitoring%20and%20AI/NDT%20Result.png) | ![Sensors](Monitoring%20and%20AI/Sensor%20Layout.png) |
+
+| Acceleration and FFT | Frequency shift |
+|:--:|:--:|
+| ![FFT](Monitoring%20and%20AI/Acceleration%20and%20FFT.png) | ![Frequency](Monitoring%20and%20AI/Frequency%20Shift.png) |
+
+| Feature trends | AI/ML assessment |
+|:--:|:--:|
+| ![Trends](Monitoring%20and%20AI/Feature%20trends.png) | ![AI](Monitoring%20and%20AI/AI%26ML%20assessment.png) |
+
+| Feature distributions and anomaly scores |
+|:--:|
+| ![Distributions](Monitoring%20and%20AI/Feature%20Distribution%20and%20Anomaly%20scores.png) |
+
+| Health monitoring timeline (30 years, monthly) |
+|:--:|
+| ![Timeline](Monitoring%20and%20AI/Health%20monitoring%20timeline.png) |
+
+### Key results (default 33 m bridge)
+
+| Item | Result |
+|---|---|
+| Healthy baseline | Pe = 7,981 kN; long-term deflection 28.1 mm; f1 / f2 / f3 = 3.50 / 13.98 / 31.46 Hz; EI = 33.4 GN·m²; dead mass 5,689 kg/m |
+| Condition states | Healthy, Minor, Moderate, Severe (prestress loss up to 30 %, stiffness loss up to 25 %) |
+| First frequency by state | about 3.49, 3.43, 3.33, 3.13 Hz |
+| Midspan deflection by state | about 28, 32, 38, 51 mm |
+| Effective prestress by state | 7,981 kN falling to about 6,000 kN |
+| NDT (midspan) | rebound about 36 → 27; UPV about 4.3 → 3.3 km/s |
+| Features | f1, f2, f3, a_RMS, δ_max, ε_soffit, UPV, rebound number |
+| Classifier (logistic regression) | 100 % test accuracy (synthetic classes are well separated) |
+| Anomaly detector (Mahalanobis) | 100 % detection, 0 % false alarms, threshold 4.9 |
+| Severity regression (ridge) | R² = 0.99 |
+| Most important features | UPV, soffit strain, rebound number, displacement |
+| Timeline milestones | first alarm about 7.6 years; Moderate at 13.6 years; Severe at 19.2 years; health index below 50 at 17.1 years |
+| Demonstration decision | Moderate (p = 0.98) → detailed structural assessment and preventive repair, urgency High |
+
+## 6. Analysis diagrams
 
 | Bending moment | Shear force |
 |:--:|:--:|
@@ -117,13 +165,15 @@ Dimensioned 3D and 2D views generated from the same engine (Views/ folder).
 
 Key default-case results: Mu = 16,032 kNm against 19,939 kNm capacity; design shear 1,348 kN against 1,561 kN; P0 = 9,960 kN, Pe at midspan 7,981 kN (19.9 % total loss); long-term deflection 28.1 mm against a 132 mm limit. 13 of 14 checks pass. The transfer maximum compression check is slightly over (22.78 against 22.50 MPa) and is shown honestly.
 
-## 6. Repository structure
+## 7. Repository structure
 
 ```text
 Post-tensioned-prestressed-concrete-I-girder/
 ├── main.py                 # Application window and page navigation (run this)
 ├── bridge_engine.py        # The calculation engine (all numbers come from here)
 ├── ui_analysis.py          # Analysis diagrams
+├── bridge_monitor.py       # Lifecycle engine: baseline, deterioration, synthetic data, features, ML, maintenance
+├── ui_monitor.py           # Monitoring & AI page
 ├── ui_3d_model.py          # 3D model and 2D dimensioned views
 ├── ui_results.py           # KPI cards, check table, calculation panel
 ├── ui_report.py            # Report text, PDF, CSV export
@@ -133,11 +183,12 @@ Post-tensioned-prestressed-concrete-I-girder/
 ├── bridge_report.pdf       # Sample generated report
 ├── requirements.txt        # Python dependencies
 ├── Diagram/                # Analysis diagram images
+├── Monitoring and AI/      # Monitoring & AI page result images
 ├── Screenshots/            # Application page screenshots
 └── Views/                  # 3D, elevation, plan, cross-section, girder views
 ```
 
-## 7. Requirements
+## 8. Requirements
 
 | Requirement | Version |
 |---|---|
@@ -149,7 +200,7 @@ Post-tensioned-prestressed-concrete-I-girder/
 
 A screen of at least 1280 x 720 is recommended. The app needs no internet connection once installed.
 
-## 8. Installation and running
+## 9. Installation and running
 
 First get the code. Either clone with Git:
 
@@ -234,7 +285,7 @@ python main.py
 
 On some Linux systems, Qt needs extra libraries: `sudo apt install libxcb-cursor0 libgl1`.
 
-## 9. Using the application
+## 10. Using the application
 
 1. **Home**: click **Start a New Project**, or **Open a Saved Project** to load a `.json` file.
 2. **Project**: enter the project name, author and design-code notes.
@@ -242,11 +293,12 @@ On some Linux systems, Qt needs extra libraries: `sudo apt install libxcb-cursor
 4. **Loads**: choose the IRC live-load class (or **Governing**) and set the superimposed loads.
 5. **3D Model**: choose a view (3D, Elevation, Plan, Cross-section, Girder section). Use the element checkboxes to show or hide parts, drag to rotate, scroll to zoom, and **Full screen** to enlarge.
 6. **Analysis**: pick any of the five diagrams from the drop-down. Full screen is available here too.
-7. **Results**: read the key figures and the check table. **Click any row** to see its full calculation in the panel below.
-8. **Report**: preview the report and export it as **PDF**, **CSV** or **TXT**.
-9. Use **Save Project** at the bottom to store all inputs in a JSON file, and **Back** / **Next** to move between pages.
+7. **Monitoring & AI**: browse the baseline, inspection scheme, NDT results, sensor layout, acceleration and FFT (choose the condition state), frequency shift, feature trends, AI/ML assessment and the maintenance decision.
+8. **Results**: read the key figures and the check table. **Click any row** to see its full calculation in the panel below.
+9. **Report**: preview the report and export it as **PDF**, **CSV** or **TXT**.
+10. Use **Save Project** at the bottom to store all inputs in a JSON file, and **Back** / **Next** to move between pages.
 
-## 10. Design methodology
+## 11. Design methodology
 
 | Stage | Method |
 |---|---|
@@ -256,9 +308,12 @@ On some Linux systems, Qt needs extra libraries: `sudo apt install libxcb-cursor
 | Shear | Variable-strut method: VRd,s, VRd,max, VRd,c |
 | Stresses | Girder alone at transfer, then composite at service (rare and quasi-permanent) |
 | Deflection | Double integration of M/EI, zero at both supports |
+| Natural frequencies | f_n = n²π/(2L²)·√(EI/m) with composite EI and dead mass per girder |
+| Synthetic data | Damage parameters (prestress loss, stiffness loss, corrosion, crack width) → frequency, deflection, strain, UPV, rebound, acceleration records |
+| Features / AI | FFT peak picking; logistic-regression classifier, Mahalanobis anomaly detector, ridge severity regression (NumPy only) |
 | Minimum dimensions | SP:71 used as a reference only |
 
-## 11. Testing
+## 12. Testing
 
 Run the engine tests from the project folder:
 
@@ -268,7 +323,7 @@ python test_engine.py
 
 The tests cover unit consistency, load envelopes, losses, capacity and deflection.
 
-## 12. Troubleshooting
+## 13. Troubleshooting
 
 | Problem | Fix |
 |---|---|
@@ -281,15 +336,15 @@ The tests cover unit consistency, load envelopes, losses, capacity and deflectio
 | 3D view feels slow | Hide elements you do not need with the checkboxes. |
 | PDF text looks wrong | Make sure matplotlib is installed; the report uses its bundled DejaVu fonts. |
 
-## 13. Assumptions and limitations
+## 14. Assumptions and limitations
 
 - Clause numbers, lane reductions, impact factors and partial factors are assumptions and should be **verified against the codes**.
 - SP:71 is for pre-tensioned girders and is used only as a dimension reference.
-- The inspection, NDT, structural health monitoring, machine-learning and maintenance stages from the course brief are **not implemented**.
+- Inspection, NDT, monitoring, deterioration and AI/ML stages use **synthetic data** with assumed deterioration magnitudes; they demonstrate the workflow and are not field-validated. Temperature effects on frequency are not modelled.
 - The default case shows one failing check (transfer maximum compression, 101.3 % utilisation). It needs a design change such as staged stressing or a larger bottom flange.
 - This is an academic tool and not a substitute for a certified design review.
 
-## 14. Author and acknowledgements
+## 15. Author and acknowledgements
 
 **Ranvir Kumar**, B.Tech Civil Engineering, IIT Kharagpur. GitHub: [@Ranvirkgpian](https://github.com/Ranvirkgpian).
 
